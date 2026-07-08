@@ -1,0 +1,9 @@
+# Copy to .github/zizmor.yml in caller repos. Lets the meta-lint zizmor pass
+# accept ref-pinned calls into our own reusable-workflows repo (@v1 moving
+# tag) while still requiring hash-pins for everything third-party.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        "Ait0u5hi/*": ref-pin
+        "*": hash-pin

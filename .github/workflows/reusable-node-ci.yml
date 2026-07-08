@@ -1,0 +1,53 @@
+# Reusable: Node.js CI (npm workspaces friendly). Based on the
+# actions/starter-workflows ci/node.js.yml template, single-version.
+# Callers: see templates/node/ci.yml
+name: Reusable Node CI
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        type: string
+        default: ubuntu-latest
+      node-version:
+        type: string
+        default: "22"
+      run-build:
+        type: boolean
+        default: true
+      run-typecheck:
+        type: boolean
+        default: false
+      test-command:
+        description: Test command to run (empty = skip tests)
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: node ${{ inputs.node-version }}
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+      - run: npm ci
+      - name: Build
+        if: ${{ inputs.run-build }}
+        run: npm run build --if-present
+      - name: Typecheck
+        if: ${{ inputs.run-typecheck }}
+        run: npm run typecheck --if-present
+      - name: Test
+        if: ${{ inputs.test-command != '' }}
+        env:
+          TEST_COMMAND: ${{ inputs.test-command }}
+        run: bash -c "$TEST_COMMAND"

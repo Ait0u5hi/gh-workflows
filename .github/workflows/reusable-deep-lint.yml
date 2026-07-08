@@ -1,0 +1,41 @@
+# Reusable: super-linter deep scan (slim image). Deliberately NOT per-PR —
+# the image pull costs minutes on private repos; run it on a weekly schedule
+# plus workflow_dispatch (see templates/deep-lint.yml).
+name: Reusable Deep Lint
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        type: string
+        default: ubuntu-latest
+
+permissions:
+  contents: read
+
+jobs:
+  deep-lint:
+    name: super-linter (full codebase)
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: super-linter/super-linter/slim@4ce20838b8ab83717e78138c5b3a1407148e0918 # v8
+        env:
+          VALIDATE_ALL_CODEBASE: true
+          # Whitelist mode: naming any VALIDATE_* disables everything else,
+          # so pylint/flake8/isort/black do NOT run alongside ruff.
+          VALIDATE_PYTHON_RUFF: true
+          VALIDATE_YAML: true
+          VALIDATE_GITHUB_ACTIONS: true
+          VALIDATE_BASH: true
+          VALIDATE_MARKDOWN: true
+          # Configs live at the repo root, not .github/linters/
+          LINTER_RULES_PATH: .
+          PYTHON_RUFF_CONFIG_FILE: ruff.toml
+          YAML_CONFIG_FILE: .yamllint.yml
+          DEFAULT_BRANCH: main
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,44 @@
+# Reusable: pytest with a test-existence guard (skips cleanly until tests exist).
+# Callers: see templates/python-plugin/eval.yml
+name: Reusable Python Eval
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        type: string
+        default: ubuntu-latest
+      python-version:
+        type: string
+        default: "3.10"
+      extra-deps:
+        description: Space-separated pip packages installed alongside pytest
+        type: string
+        default: pyyaml
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: pytest
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ inputs.python-version }}
+      - name: Run tests (skips cleanly until tests exist)
+        env:
+          EXTRA_DEPS: ${{ inputs.extra-deps }}
+        run: |
+          if [ -d tests ] || compgen -G "test_*.py" >/dev/null || compgen -G "*_test.py" >/dev/null; then
+            # shellcheck disable=SC2086  # EXTRA_DEPS is intentionally word-split
+            pip install --quiet pytest $EXTRA_DEPS
+            python -m pytest -q
+          else
+            echo "no tests yet — nothing to run"
+          fi

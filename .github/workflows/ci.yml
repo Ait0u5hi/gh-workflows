@@ -1,0 +1,38 @@
+# Self-CI for the reusable-workflows repo: the meta-lint trio applied to the
+# library itself.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  meta-lint:
+    name: meta-lint (actionlint + yamllint + zizmor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: actionlint (lint the workflows themselves)
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint -color
+      - name: yamllint
+        run: |
+          pip install --quiet yamllint
+          yamllint .
+      - name: zizmor (workflow security audit)
+        run: |
+          pip install --quiet zizmor
+          zizmor --no-online-audits .github/workflows/

@@ -1,0 +1,13 @@
+# Starter labeler config — copy to .github/labeler.yml and adjust paths.
+# actions/labeler v5 syntax.
+docs:
+  - changed-files:
+      - any-glob-to-any-file: ["**/*.md", "docs/**"]
+
+workflows:
+  - changed-files:
+      - any-glob-to-any-file: [".github/workflows/**"]
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file: ["tests/**", "**/test_*.py", "**/*_test.py"]

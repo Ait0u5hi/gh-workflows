@@ -1,0 +1,21 @@
+# Copy to .github/workflows/validation.yml in a Hermes plugin repo.
+name: Validation
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: validation-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  validation:
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-python-validation.yml@v1
+    with:
+      plugin-validate: true

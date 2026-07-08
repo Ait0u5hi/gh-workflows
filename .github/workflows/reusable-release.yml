@@ -1,0 +1,84 @@
+# Reusable: git-cliff release notes + CHANGELOG regeneration + GitHub Release.
+# Trigger from the caller on push tags v*; uses the CALLER repo's cliff.toml.
+# Caller stub must grant: permissions: contents: write
+# Callers: see templates/python-plugin/release.yml
+name: Reusable Release
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        type: string
+        default: ubuntu-latest
+      plugin-manifest:
+        description: Sync plugin.yaml version to the tag and commit back to main (Hermes plugin repos)
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
+    steps:
+      # Credentials deliberately persisted: this job pushes the changelog
+      # commit back to main.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # zizmor: ignore[artipacked] # v4
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Generate release notes for this tag
+        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: RELEASE_NOTES.md
+
+      - name: Regenerate full CHANGELOG.md
+        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4
+        with:
+          config: cliff.toml
+          args: --tag ${{ github.ref_name }}
+        env:
+          OUTPUT: CHANGELOG.md
+
+      - name: Sync plugin.yaml version and commit back to main
+        if: ${{ inputs.plugin-manifest }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i -E "s/^version: \".*\"/version: \"${VERSION}\"/" plugin.yaml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md plugin.yaml
+          if git diff --cached --quiet; then
+            echo "nothing to commit"
+          else
+            git commit -m "chore(release): ${GITHUB_REF_NAME} changelog + version sync [skip ci]"
+            git push origin main
+          fi
+
+      - name: Commit CHANGELOG.md back to main
+        if: ${{ !inputs.plugin-manifest }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          if git diff --cached --quiet; then
+            echo "nothing to commit"
+          else
+            git commit -m "chore(release): ${GITHUB_REF_NAME} changelog [skip ci]"
+            git push origin main
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file RELEASE_NOTES.md

@@ -1,0 +1,19 @@
+# Copy to .github/workflows/eval.yml in a Hermes plugin repo.
+name: Eval
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: eval-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-python-eval.yml@v1

@@ -1,0 +1,12 @@
+# Relaxed yamllint: flag breakage (syntax, duplicate keys), not style.
+extends: relaxed
+
+rules:
+  line-length:
+    max: 130
+    level: warning
+  trailing-spaces:
+    level: warning
+
+ignore: |
+  .venv/

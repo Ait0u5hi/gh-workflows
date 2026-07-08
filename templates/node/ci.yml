@@ -1,0 +1,23 @@
+# Copy to .github/workflows/ci.yml in a Node repo (npm workspaces OK).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-node-ci.yml@v1
+    with:
+      node-version: "22"
+      # run-typecheck: true   # enable once the repo's typecheck baseline is green/budgeted
+      # test-command: "npm test --workspaces --if-present"
