@@ -25,14 +25,22 @@ jobs:
         with:
           persist-credentials: false
       - name: actionlint (lint the workflows themselves)
+        # Installer fetched by immutable commit SHA (not a moving branch) and the
+        # binary version pinned — this repo enforces SHA-pins everywhere, so its
+        # own tool installs must not be a runtime-fetch supply-chain hole.
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          # rhysd/actionlint v1.7.12
+          ACTIONLINT_INSTALLER_SHA: 914e7df21a07ef503a81201c76d2b11c789d3fca
         run: |
-          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          installer="https://raw.githubusercontent.com/rhysd/actionlint/${ACTIONLINT_INSTALLER_SHA}/scripts/download-actionlint.bash"
+          bash <(curl -sSfL "$installer") "$ACTIONLINT_VERSION"
           ./actionlint -color
       - name: yamllint
         run: |
-          pip install --quiet yamllint
+          pip install --quiet yamllint==1.38.0
           yamllint .
       - name: zizmor (workflow security audit)
         run: |
-          pip install --quiet zizmor
+          pip install --quiet zizmor==1.26.1
           zizmor --no-online-audits .github/workflows/
