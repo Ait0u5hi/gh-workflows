@@ -1,0 +1,16 @@
+# gh-workflows dogfoods its own governance reusables (local refs).
+name: PR Governance
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  contributor-check:
+    uses: ./.github/workflows/reusable-contributor-check.yml
+
+  crossplatform-lint:
+    uses: ./.github/workflows/reusable-crossplatform-lint.yml

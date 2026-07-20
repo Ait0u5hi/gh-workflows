@@ -1,0 +1,73 @@
+# Reusable Contributor Attribution Check.
+# Fails a PR whose commit author emails have no mapping under
+# contributors/emails/<email> in the CALLER repo. Add one with
+# scripts/add_contributor.py (vendored from gh-workflows).
+#
+# Adapted from NousResearch/hermes-agent (MIT, (c) 2025 Nous Research);
+# generalized (removed the repo-specific release.py AUTHOR_MAP fallback,
+# base branch is an input).
+name: Contributor Attribution Check (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      base-ref:
+        description: Base branch to diff commits against.
+        type: string
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  check-attribution:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0  # full history for git log
+
+      - name: Check for unmapped contributor emails
+        env:
+          BASE_REF: ${{ inputs.base-ref }}
+        run: |
+          MERGE_BASE=$(git merge-base "origin/${BASE_REF}" HEAD)
+          NEW_EMAILS=$(git log "${MERGE_BASE}..HEAD" --format='%ae' --no-merges | sort -u)
+          if [ -z "$NEW_EMAILS" ]; then
+            echo "No new commits to check."; exit 0
+          fi
+
+          MISSING=""
+          while IFS= read -r email; do
+            case "$email" in
+              *noreply@github.com*|*dependabot*|*github-actions*|*anthropic.com*|*cursor.com*)
+                continue ;;
+            esac
+            # GitHub id+login noreply emails auto-resolve to a real account.
+            if echo "$email" | grep -qP '\+.*@users\.noreply\.github\.com'; then
+              continue
+            fi
+            if [ -f "contributors/emails/${email}" ]; then
+              continue
+            fi
+            AUTHOR=$(git log --author="$email" --format='%an' -1)
+            MISSING="${MISSING}\n  ${email} (${AUTHOR})"
+          done <<< "$NEW_EMAILS"
+
+          if [ -n "$MISSING" ]; then
+            echo ""
+            echo "⚠️  New contributor email(s) without a mapping:"
+            echo -e "$MISSING"
+            echo ""
+            echo "Add a mapping file:"
+            echo -e "$MISSING" | while read -r line; do
+              email=$(echo "$line" | sed 's/^ *//' | cut -d' ' -f1)
+              [ -z "$email" ] && continue
+              echo "    python3 scripts/add_contributor.py ${email} <github-username>"
+            done
+            echo ""
+            echo "Find a login for an email:  gh api 'search/users?q=EMAIL+in:email' --jq '.items[0].login'"
+            exit 1
+          fi
+          echo "✅ All contributor emails are mapped."
