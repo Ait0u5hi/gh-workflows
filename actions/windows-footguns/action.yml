@@ -1,0 +1,37 @@
+# Composite action wrapping the vendored cross-platform footgun linter.
+# Referenced by reusable-crossplatform-lint.yml. Using a composite action (rather
+# than a second `actions/checkout` of this private repo) lets consumers pull the
+# linter with the same same-owner private-access grant that already resolves the
+# reusable workflow — no cross-repo token, no repo-visibility change. The full
+# gh-workflows repo is fetched alongside the action, so the linter script at
+# scripts/check-windows-footguns.py is reachable relative to this action.
+name: Windows footgun scan
+description: Diff changed Python files against a base ref and scan them for Windows/cross-platform footguns.
+
+inputs:
+  base-ref:
+    description: Base branch to diff changed files against.
+    required: false
+    default: main
+
+runs:
+  using: composite
+  steps:
+    - name: Scan changed Python files
+      shell: bash
+      env:
+        BASE_REF: ${{ inputs.base-ref }}
+      run: |
+        SCRIPT="${GITHUB_ACTION_PATH}/../../scripts/check-windows-footguns.py"
+        BASE=$(git merge-base "origin/${BASE_REF}" HEAD 2>/dev/null || true)
+        if [ -n "$BASE" ]; then
+          FILES=$(git diff --name-only "${BASE}..HEAD" -- '*.py' | tr '\n' ' ')
+        else
+          FILES=$(git ls-files '*.py' | tr '\n' ' ')
+        fi
+        if [ -z "${FILES// }" ]; then
+          echo "No Python files to scan."; exit 0
+        fi
+        echo "Scanning: $FILES"
+        # shellcheck disable=SC2086  # intentional word-split: pass files as separate args
+        python3 "$SCRIPT" $FILES
