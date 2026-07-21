@@ -1,0 +1,114 @@
+# Reusable: OSV-Scanner dependency-vulnerability scan.
+#
+# Detection-only — scans the repo's manifests/lockfiles against the OSV
+# database and uploads SARIF to the Security tab (Code Scanning > OSV-Scanner).
+# It does NOT open PRs or move pins; it reports known CVEs in currently-pinned
+# versions so a repo can patch on its own schedule. Complements
+# reusable-security.yml (gitleaks = secrets) and the meta-lint zizmor pass
+# (workflow hardening) by covering the orthogonal "a pinned dep became
+# known-vulnerable" case.
+#
+# Language-agnostic: OSV-Scanner auto-detects supported manifests (pyproject/
+# uv.lock, package-lock.json, Cargo.lock, go.mod, ...) and ignores the rest, so
+# one reusable serves the Python and Node consumer repos. Override `scan-args`
+# to target specific lockfiles instead of the recursive default.
+#
+# Caller stub must grant: contents: read, security-events: write, actions: read.
+# See templates/osv.yml.
+name: Reusable OSV Scan
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        type: string
+        default: ubuntu-latest
+      scan-args:
+        description: >-
+          Arguments passed to the scanner. Default scans the checkout
+          recursively (respecting .gitignore, so vendored dirs like
+          node_modules are skipped). Override to pin explicit lockfiles, e.g.
+          "--lockfile=uv.lock --lockfile=package-lock.json".
+        type: string
+        default: "--recursive ."
+      fail-on-vuln:
+        description: >-
+          Fail the job when a vulnerability is found. Default false so a
+          pre-existing CVE in a deliberately-held pin does not block merges;
+          the SARIF upload still surfaces it in the Security tab.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Scan dependencies
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 15
+    permissions:
+      # Required to upload the SARIF to code scanning. actions:read is needed
+      # by the CodeQL uploader on private repos.
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Run scanner
+        uses: google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+        with:
+          scan-args: |-
+            --output=results.json
+            --format=json
+            ${{ inputs.scan-args }}
+        continue-on-error: true
+
+      - name: Generate SARIF report
+        uses: google/osv-scanner-action/osv-reporter-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+        with:
+          scan-args: |-
+            --output=results.sarif
+            --new=results.json
+            --gh-annotations=false
+            --fail-on-vuln=${{ inputs.fail-on-vuln }}
+
+      - name: Upload SARIF artifact
+        id: upload_artifact
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: osv-scanner-sarif
+          path: results.sarif
+          retention-days: 5
+
+      - name: Upload to code scanning
+        # Non-fatal: SARIF upload to the code-scanning dashboard requires GitHub
+        # Advanced Security, which is free on public repos but not enabled on our
+        # private ones. Where it isn't available this warns instead of failing;
+        # findings still ship as the SARIF artifact above, and `fail-on-vuln`
+        # gates the job independently of the dashboard.
+        continue-on-error: true
+        if: ${{ !cancelled() }}
+        uses: github/codeql-action/upload-sarif@cdefb33c0f6224e58673d9004f47f7cb3e328b89 # v4.31.10
+        with:
+          sarif_file: results.sarif
+
+      - name: Print code-scanning URL
+        if: ${{ !cancelled() }}
+        env:
+          SERVER_URL: ${{ github.server_url }}
+          REPOSITORY: ${{ github.repository }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          echo "OSV-Scanner results (Security tab):"
+          echo "${SERVER_URL}/${REPOSITORY}/security/code-scanning?query=is%3Aopen+branch%3A${REF_NAME}+tool%3Aosv-scanner"
+
+      - name: Fail if artifact upload failed
+        if: ${{ always() && steps.upload_artifact.outcome == 'failure' }}
+        run: |
+          echo "::error::SARIF upload failed — most likely a scanner error earlier in the job."
+          exit 1

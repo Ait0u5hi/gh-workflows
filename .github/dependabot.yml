@@ -1,0 +1,39 @@
+# Dependabot for gh-workflows itself.
+#
+# Deliberately scoped to github-actions only. This repo pins every third-party
+# action by full commit SHA (with a `# vX.Y.Z` comment) as a supply-chain
+# control — see CONTRIBUTING.md. Those SHA pins must be moved when upstream
+# actions publish patches (often themselves security fixes). Dependabot opens
+# a PR with the new SHA + release notes; we review and merge like any other PR.
+#
+# We do NOT enable any source-dependency ecosystem (pip/npm/etc.) here — this
+# repo has none. Consumer repos copy templates/dependabot.yml, which is the
+# same actions-only policy: source-dependency pins (uv.lock, package-lock.json)
+# stay under manual, reviewed control and are not bumped on a schedule.
+#
+# CVE-only security-update PRs for source deps are handled separately via each
+# repo's "Dependabot security updates" setting (Settings -> Code security),
+# which fires when a pinned version becomes known-bad — exactly when we want to
+# move the pin — and does not conflict with the pinning strategy.
+
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore(actions)"
+      include: "scope"
+    groups:
+      # Batch routine action bumps into one PR per week to reduce noise.
+      # Security updates still open individually and bypass grouping.
+      actions-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"

@@ -37,6 +37,7 @@ caller fails at workflow-resolution time.
 | `reusable-python-validation.yml` | ruff (repo's `ruff.toml`), optional plugin.yaml validate + compileall, meta-lint (actionlint + yamllint + zizmor) | `python-version` (3.10), `plugin-validate` (false), `meta-lint` (true) |
 | `reusable-python-eval.yml` | pytest with test-existence guard (skips cleanly until tests exist) | `python-version` (3.10), `extra-deps` (pyyaml) |
 | `reusable-security.yml` | gitleaks over full history — caller must grant `pull-requests: read` | — |
+| `reusable-osv.yml` | OSV-Scanner dependency-CVE scan; SARIF to the Security tab — caller must grant `security-events: write`. Language-agnostic (auto-detects manifests) | `scan-args` (`--recursive .`), `fail-on-vuln` (false) |
 | `reusable-release.yml` | git-cliff release notes + CHANGELOG regen + GitHub Release; needs caller `cliff.toml`, `contents: write` | `plugin-manifest` (false — sync plugin.yaml version) |
 | `reusable-node-ci.yml` | setup-node + npm cache, `npm ci`, build/typecheck `--if-present`, optional test command | `node-version` (22), `run-build` (true), `run-typecheck` (false), `test-command` ("") |
 | `reusable-deep-lint.yml` | super-linter slim, full codebase, whitelist: ruff/yaml/actions/bash/markdown. Weekly + dispatch only — never per-PR (image pull burns metered private-repo minutes) | — |
@@ -50,11 +51,37 @@ generally need an x86 host; runners register per-repo on a personal account;
 registration needs repo admin; never attach a self-hosted runner to a public
 repo.
 
+## Composite actions
+
+Reference intra-org, ref-pinned (`@v1`), same as the reusables:
+
+| Action | Purpose |
+|---|---|
+| `actions/windows-footguns` | wraps the vendored cross-platform linter; used by `reusable-crossplatform-lint.yml` |
+| `actions/retry` | run a shell command with retries — wrap flaky installs (`npm ci`, `uv sync`) so CI self-heals on transient network flakes; optional `stdout` output |
+| `actions/detect-changes` | diff changed files against `base-ref` and match caller-supplied `filters` (newline `name: glob…`); emits a JSON `changes` map + `any` bool for job gating. Fails open on push/dispatch. Generalized from hermes-agent's repo-specific classifier |
+
+```yaml
+- uses: Ait0u5hi/gh-workflows/actions/retry@v1
+  with:
+    command: npm ci
+- id: detect
+  uses: Ait0u5hi/gh-workflows/actions/detect-changes@v1
+  with:
+    filters: |
+      python: **/*.py pyproject.toml
+      workflows: .github/workflows/**
+# later job: if: fromJSON(needs.detect.outputs.changes).python
+```
+
 ## Templates
 
 - `templates/python-plugin/` — validation, eval, security, release (Hermes plugin repos)
 - `templates/node/ci.yml` — Node/npm-workspaces CI
 - `templates/deep-lint.yml` — weekly super-linter sweep
+- `templates/osv.yml` — dependency-CVE scan (copy to `.github/workflows/`)
+- `templates/dependabot.yml` — copy to `.github/dependabot.yml`; keeps SHA-pinned
+  actions current (github-actions ecosystem only — source-dep pins stay manual)
 - `templates/zizmor.yml` — copy to `.github/zizmor.yml` alongside any stub
 - `templates/automation/` — optional: `stale.yml` (warn-only, never closes —
   the fleet ledger tracks open PRs) and `label.yml` + `labeler.yml` starter

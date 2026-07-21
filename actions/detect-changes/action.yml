@@ -1,0 +1,103 @@
+# Generalized from NousResearch/hermes-agent (MIT, (c) 2025 Nous Research):
+# .github/actions/detect-changes. Their version hardcodes a repo-specific lane
+# taxonomy (python/frontend/site/mcp_catalog/...) via scripts/ci/classify_changes.py.
+# This is the agnostic seam: caller supplies the filters, so one action gates
+# jobs in any repo. Reference as Ait0u5hi/gh-workflows/actions/detect-changes@v1.
+#
+# Classify a PR's changed files into named lanes so the caller can conditionally
+# run only the jobs a PR can affect. Fails OPEN: on push/dispatch, or when the
+# diff cannot be computed, every lane is reported changed so nothing is skipped.
+name: Detect changed lanes
+description: >-
+  Diff changed files against a base ref and match them to caller-supplied
+  glob filters, emitting a JSON map of lane -> changed(bool) for job gating.
+
+inputs:
+  filters:
+    description: >-
+      Newline-separated `name: glob [glob ...]` lanes (globs are space-
+      separated, fnmatch-style, matched against repo-relative paths). Example:
+        python: **/*.py pyproject.toml
+        workflows: .github/workflows/**
+    required: true
+  base-ref:
+    description: Base branch to diff changed files against (PR events only).
+    required: false
+    default: main
+
+outputs:
+  changes:
+    description: >-
+      JSON object mapping each lane name to a boolean, e.g.
+      {"python": true, "workflows": false}. Consume with
+      fromJSON(steps.<id>.outputs.changes).<lane>.
+    value: ${{ steps.classify.outputs.changes }}
+  any:
+    description: '"true" if any lane changed, else "false".'
+    value: ${{ steps.classify.outputs.any }}
+
+runs:
+  using: composite
+  steps:
+    - name: Classify changed files
+      id: classify
+      shell: bash
+      env:
+        FILTERS: ${{ inputs.filters }}
+        BASE_REF: ${{ inputs.base-ref }}
+        EVENT_NAME: ${{ github.event_name }}
+      run: |
+        set -uo pipefail
+        # Compute the changed-file list. On pull_request, diff against the
+        # merge-base with the base ref. On any other event (push, dispatch,
+        # schedule) or if the merge-base is unavailable (shallow clone with no
+        # base ref fetched), leave it empty so the classifier fails open.
+        CHANGED=""
+        if [ "$EVENT_NAME" = "pull_request" ]; then
+          BASE=$(git merge-base "origin/${BASE_REF}" HEAD 2>/dev/null || true)
+          if [ -n "$BASE" ]; then
+            CHANGED=$(git diff --name-only "${BASE}..HEAD" || true)
+          else
+            echo "::warning::no merge-base with origin/${BASE_REF} (shallow checkout?) — failing open"
+          fi
+        fi
+        echo "Changed files:"
+        printf '%s\n' "${CHANGED:-(none / fail-open)}"
+        # Python does the glob matching (fnmatch) and JSON emission; it is
+        # always present on GitHub-hosted runners and avoids brittle bash globbing.
+        CHANGED="$CHANGED" python3 - <<'PY' >> "$GITHUB_OUTPUT"
+        import fnmatch, json, os
+
+        def matches(path, pattern):
+            # fnmatch's `*` spans `/`, so `.github/workflows/**` works as expected.
+            # But `**/*.py` requires a literal `/`, missing top-level files, so we
+            # also try the pattern with a leading `**/` stripped — making `**/*.py`
+            # match both `app.py` and `src/app.py`, the intuitive gitignore behavior.
+            if fnmatch.fnmatch(path, pattern):
+                return True
+            if pattern.startswith("**/") and fnmatch.fnmatch(path, pattern[3:]):
+                return True
+            return False
+
+        changed = [f for f in os.environ.get("CHANGED", "").splitlines() if f.strip()]
+        fail_open = not changed  # empty list => non-PR event or undiffable => all lanes on
+        result = {}
+        for raw in os.environ.get("FILTERS", "").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            name, _, globs = line.partition(":")
+            name = name.strip()
+            if not name:
+                continue
+            patterns = globs.split()
+            if fail_open:
+                result[name] = True
+                continue
+            result[name] = any(
+                matches(f, pat) for f in changed for pat in patterns
+            )
+        print("changes=" + json.dumps(result))
+        print("any=" + ("true" if (fail_open or any(result.values())) else "false"))
+        PY
+        echo "Result:"; cat "$GITHUB_OUTPUT" | grep -E '^(changes|any)='

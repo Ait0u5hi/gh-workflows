@@ -1,0 +1,35 @@
+# Copy to .github/dependabot.yml in any Ait0u5hi repo.
+#
+# Scoped to github-actions only. We pin third-party actions by full commit SHA
+# as a supply-chain control; Dependabot keeps those SHA pins current by opening
+# a PR (new SHA + release notes) when upstream publishes a patch. Review and
+# merge like any other PR.
+#
+# Source-dependency ecosystems (pip / npm / etc.) are intentionally NOT enabled:
+# those pins (uv.lock, package-lock.json, requirements) are moved deliberately,
+# after review, not on a schedule. CVE-only security bumps are handled by each
+# repo's "Dependabot security updates" setting (Settings -> Code security),
+# which fires only when a pinned version becomes known-vulnerable.
+#
+# If a repo genuinely wants scheduled source-dep PRs, add another `updates:`
+# entry — but that is a deliberate per-repo decision, not the default.
+
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore(actions)"
+      include: "scope"
+    groups:
+      actions-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
