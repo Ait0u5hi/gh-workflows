@@ -42,6 +42,24 @@ from typing import Iterable
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+
+def rel_to_repo(path: Path) -> str:
+    """Path for display / exclusion lookup, tolerant of files outside REPO_ROOT.
+
+    The linter normally runs inside the repo it scans (REPO_ROOT == that repo).
+    When invoked on another checkout's files — e.g. the shared reusable workflow
+    scanning a consumer repo via the windows-footguns composite action — the
+    scanned paths live under a different root, so relative_to(REPO_ROOT) raises.
+    Fall back to a cwd-relative path, then to the absolute path.
+    """
+    for base in (REPO_ROOT, Path.cwd()):
+        try:
+            return path.relative_to(base).as_posix()
+        except ValueError:
+            continue
+    return path.as_posix()
+
+
 SUPPRESS_MARKER = re.compile(r"#\s*windows-footgun\s*:\s*ok\b", re.IGNORECASE)
 
 # Line-level guard hints. If a line contains any of these tokens, we assume
@@ -341,7 +359,7 @@ def should_scan_file(path: Path) -> bool:
         if str(path).endswith(suffix):
             return False
     # Skip self and docs that intentionally mention the patterns
-    rel = path.relative_to(REPO_ROOT).as_posix()
+    rel = rel_to_repo(path)
     if rel in EXCLUDED_FILES:
         return False
     # Only scan text files (rough heuristic — .py, .md, .sh, .ps1, .yaml, etc.)
@@ -603,7 +621,7 @@ def main(argv: list[str]) -> int:
         files_scanned += 1
         matches = scan_file(path, FOOTGUNS)
         for lineno, line, fg in matches:
-            rel = path.relative_to(REPO_ROOT).as_posix()
+            rel = rel_to_repo(path)
             print(f"{rel}:{lineno}: [{fg.name}]")
             print(f"    {line.strip()}")
             print(f"    — {fg.message}")

@@ -2,13 +2,19 @@
 # (bare os.killpg / signal.SIGKILL / os.fork / hardcoded /tmp / etc.) using the
 # shared linter vendored in gh-workflows. Platform-gated matches are suppressed
 # in-source with `# windows-footgun: ok`.
+#
+# The linter is pulled via the windows-footguns *composite action* rather than a
+# second `actions/checkout` of this private repo. A cross-repo `checkout` uses the
+# caller's default GITHUB_TOKEN, which cannot read this private repo (git exit
+# 128); a same-owner composite action resolves with the same private-access grant
+# that already loads this reusable workflow — no token, no visibility change.
 name: Cross-platform lint (reusable)
 
 on:
   workflow_call:
     inputs:
       gh-workflows-ref:
-        description: gh-workflows ref that provides the linter script.
+        description: Retained for back-compat; the composite action is pinned to the same tag as this reusable workflow.
         type: string
         default: main
       base-ref:
@@ -27,28 +33,13 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           fetch-depth: 0
-
-      - name: Fetch the shared linter
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-        with:
-          repository: Ait0u5hi/gh-workflows
-          ref: ${{ inputs.gh-workflows-ref }}
-          path: .gh-workflows
           persist-credentials: false
 
-      - name: Scan changed Python files
-        env:
-          BASE_REF: ${{ inputs.base-ref }}
-        run: |
-          BASE=$(git merge-base "origin/${BASE_REF}" HEAD 2>/dev/null || true)
-          if [ -n "$BASE" ]; then
-            FILES=$(git diff --name-only "${BASE}..HEAD" -- '*.py' | tr '\n' ' ')
-          else
-            FILES=$(git ls-files '*.py' | tr '\n' ' ')
-          fi
-          if [ -z "${FILES// }" ]; then
-            echo "No Python files to scan."; exit 0
-          fi
-          echo "Scanning: $FILES"
-          # shellcheck disable=SC2086  # intentional word-split: pass files as separate args
-          python3 .gh-workflows/scripts/check-windows-footguns.py $FILES
+      - name: Scan changed Python for Windows footguns
+        # Same-repo composite action, versioned by the same tag as this reusable
+        # workflow (they move together on release), so a commit-hash pin would be
+        # self-referential and churn on every change. It resolves via the same
+        # same-owner private-access grant that already loads this reusable.
+        uses: Ait0u5hi/gh-workflows/actions/windows-footguns@v1  # zizmor: ignore[unpinned-uses]
+        with:
+          base-ref: ${{ inputs.base-ref }}
