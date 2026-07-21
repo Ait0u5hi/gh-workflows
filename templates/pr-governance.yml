@@ -1,0 +1,19 @@
+# Copy to <your-repo>/.github/workflows/pr-governance.yml.
+# Contribution governance (attribution + cross-platform footguns) via the
+# gh-workflows reusables. The stub owns triggers/permissions; logic lives in
+# gh-workflows. Pin @main to always-current, or @v1 once you want stability.
+name: PR Governance
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  contributor-check:
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-contributor-check.yml@main
+
+  crossplatform-lint:
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-crossplatform-lint.yml@main

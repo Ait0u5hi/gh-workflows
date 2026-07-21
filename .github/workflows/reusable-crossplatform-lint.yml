@@ -1,0 +1,54 @@
+# Reusable cross-platform lint: scan changed Python for Windows footguns
+# (bare os.killpg / signal.SIGKILL / os.fork / hardcoded /tmp / etc.) using the
+# shared linter vendored in gh-workflows. Platform-gated matches are suppressed
+# in-source with `# windows-footgun: ok`.
+name: Cross-platform lint (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      gh-workflows-ref:
+        description: gh-workflows ref that provides the linter script.
+        type: string
+        default: main
+      base-ref:
+        description: Base branch to diff changed files against.
+        type: string
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  windows-footguns:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Fetch the shared linter
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          repository: Ait0u5hi/gh-workflows
+          ref: ${{ inputs.gh-workflows-ref }}
+          path: .gh-workflows
+          persist-credentials: false
+
+      - name: Scan changed Python files
+        env:
+          BASE_REF: ${{ inputs.base-ref }}
+        run: |
+          BASE=$(git merge-base "origin/${BASE_REF}" HEAD 2>/dev/null || true)
+          if [ -n "$BASE" ]; then
+            FILES=$(git diff --name-only "${BASE}..HEAD" -- '*.py' | tr '\n' ' ')
+          else
+            FILES=$(git ls-files '*.py' | tr '\n' ' ')
+          fi
+          if [ -z "${FILES// }" ]; then
+            echo "No Python files to scan."; exit 0
+          fi
+          echo "Scanning: $FILES"
+          # shellcheck disable=SC2086  # intentional word-split: pass files as separate args
+          python3 .gh-workflows/scripts/check-windows-footguns.py $FILES

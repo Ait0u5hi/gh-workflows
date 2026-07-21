@@ -40,6 +40,8 @@ caller fails at workflow-resolution time.
 | `reusable-release.yml` | git-cliff release notes + CHANGELOG regen + GitHub Release; needs caller `cliff.toml`, `contents: write` | `plugin-manifest` (false — sync plugin.yaml version) |
 | `reusable-node-ci.yml` | setup-node + npm cache, `npm ci`, build/typecheck `--if-present`, optional test command | `node-version` (22), `run-build` (true), `run-typecheck` (false), `test-command` ("") |
 | `reusable-deep-lint.yml` | super-linter slim, full codebase, whitelist: ruff/yaml/actions/bash/markdown. Weekly + dispatch only — never per-PR (image pull burns metered private-repo minutes) | — |
+| `reusable-contributor-check.yml` | fails a PR whose commit author emails aren't mapped under `contributors/emails/<email>` (add with `scripts/add_contributor.py`); bots auto-resolve | `base-ref` (main) |
+| `reusable-crossplatform-lint.yml` | scans changed Python for Windows footguns via `scripts/check-windows-footguns.py`; suppress a platform-gated line with `# windows-footgun: ok` | `gh-workflows-ref` (main), `base-ref` (main) |
 
 Every reusable takes `runs-on` (default `ubuntu-latest`). To move a repo to a
 self-hosted runner later, set it in the stub — one line. Caveats when that
@@ -56,6 +58,19 @@ repo.
 - `templates/zizmor.yml` — copy to `.github/zizmor.yml` alongside any stub
 - `templates/automation/` — optional: `stale.yml` (warn-only, never closes —
   the fleet ledger tracks open PRs) and `label.yml` + `labeler.yml` starter
+- `templates/pr-governance.yml` — contributor-attribution + cross-platform
+  footgun checks (copy to `.github/workflows/`)
+
+## Contribution governance
+
+`CONTRIBUTING.md`, `.github/PULL_REQUEST_TEMPLATE.md`, and the two governance
+reusables above are the shared contribution standard for Ait0u5hi repos
+(conventional commits, one-concern PRs, SHA-pinned actions, mapped contributor
+attribution, cross-platform code). To adopt in another repo: copy
+`templates/pr-governance.yml` + `scripts/add_contributor.py`, seed your
+`contributors/emails/` mapping, and crib the CONTRIBUTING / PR template.
+The cross-platform linter + attribution pattern are adapted from
+[NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) (MIT).
 
 ## Versioning
 
