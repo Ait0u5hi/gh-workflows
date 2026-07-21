@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   contributor-check:
-    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-contributor-check.yml@main
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-contributor-check.yml@v1
 
   crossplatform-lint:
-    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-crossplatform-lint.yml@main
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-crossplatform-lint.yml@v1
