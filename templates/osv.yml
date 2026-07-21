@@ -1,0 +1,30 @@
+# Copy to .github/workflows/osv.yml. Dependency-CVE scan (OSV database).
+# The security-events:write grant is required — the reusable uploads SARIF to
+# the repo's code-scanning dashboard. Findings land in the Security tab.
+name: OSV
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly scan against main — catches CVEs published after merge for deps
+    # that haven't changed since.
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: osv-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  osv:
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-osv.yml@v1
+    # To scan explicit lockfiles instead of the recursive default:
+    # with:
+    #   scan-args: "--lockfile=uv.lock --lockfile=package-lock.json"
