@@ -40,6 +40,6 @@ jobs:
         # workflow (they move together on release), so a commit-hash pin would be
         # self-referential and churn on every change. It resolves via the same
         # same-owner private-access grant that already loads this reusable.
-        uses: Ait0u5hi/gh-workflows/actions/windows-footguns@fix/crossplatform-composite-action  # zizmor: ignore[unpinned-uses]
+        uses: Ait0u5hi/gh-workflows/actions/windows-footguns@v1  # zizmor: ignore[unpinned-uses]
         with:
           base-ref: ${{ inputs.base-ref }}
