@@ -1,0 +1,5 @@
+This project includes work adapted from third-party sources:
+
+- The cross-platform linter and the contributor-attribution pattern are adapted
+  from NousResearch/hermes-agent (https://github.com/NousResearch/hermes-agent),
+  which is licensed under the MIT License.
