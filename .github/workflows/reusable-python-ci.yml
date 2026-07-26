@@ -1,0 +1,92 @@
+# Reusable: generic Python CI — ruff lint (once) + pytest across a version
+# matrix. Deliberately has NO Hermes plugin.yaml coupling (that lives in
+# reusable-python-validation.yml behind the opt-in plugin-validate input), so
+# any plain Python repo can adopt this. Supersedes reusable-python-eval.yml for
+# new repos (adds ruff + a version matrix); the single-version eval reusable is
+# kept for existing callers.
+# Callers: see templates/python/ci.yml
+name: Reusable Python CI
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        type: string
+        default: ubuntu-latest
+      python-versions:
+        description: JSON array of Python versions for the pytest matrix.
+        type: string
+        default: '["3.10","3.11","3.12","3.13"]'
+      run-ruff:
+        description: Run ruff lint (once, on the default runner Python).
+        type: boolean
+        default: true
+      test-command:
+        description: Override the default `python -m pytest -q` invocation.
+        type: string
+        default: ""
+      extra-deps:
+        description: Space-separated pip packages installed alongside pytest.
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: ruff
+    if: ${{ inputs.run-ruff }}
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/ruff-action@278981a28ce3188b1e39527901f38254bf3aac89 # v4.1.0
+
+  test:
+    name: pytest ${{ matrix.python-version }}
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJSON(inputs.python-versions) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          persist-credentials: false
+      - name: Detect dependency manifest
+        # setup-python's `cache: pip` hard-fails when no manifest exists, which
+        # would break a manifest-less repo. Only enable caching when there is a
+        # file to hash, matching this library's "skip cleanly" philosophy.
+        id: detect
+        run: |
+          if compgen -G "pyproject.toml" >/dev/null \
+            || compgen -G "requirements*.txt" >/dev/null \
+            || [ -f setup.py ] || [ -f setup.cfg ]; then
+            echo "cache=pip" >> "$GITHUB_OUTPUT"
+          else
+            echo "cache=" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: ${{ steps.detect.outputs.cache }}
+      - name: Run tests (skips cleanly until tests exist)
+        env:
+          EXTRA_DEPS: ${{ inputs.extra-deps }}
+          TEST_COMMAND: ${{ inputs.test-command }}
+        run: |
+          if [ -d tests ] || compgen -G "test_*.py" >/dev/null || compgen -G "*_test.py" >/dev/null; then
+            # shellcheck disable=SC2086  # EXTRA_DEPS is intentionally word-split
+            pip install --quiet pytest $EXTRA_DEPS
+            if [ -n "$TEST_COMMAND" ]; then
+              bash -c "$TEST_COMMAND"
+            else
+              python -m pytest -q
+            fi
+          else
+            echo "no tests yet — nothing to run"
+          fi

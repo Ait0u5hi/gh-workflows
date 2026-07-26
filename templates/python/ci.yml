@@ -1,0 +1,26 @@
+# Copy to .github/workflows/ci.yml in a plain Python repo (pytest + ruff).
+# Generic — no Hermes plugin.yaml coupling. For Hermes plugin repos use
+# templates/python-plugin/ instead. Also copy templates/zizmor.yml ->
+# .github/zizmor.yml, same as the other stubs.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-python-ci.yml@v1
+    # with:
+    #   python-versions: '["3.11","3.12"]'   # narrow the matrix
+    #   extra-deps: "pytest-cov"              # deps pytest needs at runtime
+    #   test-command: "python -m pytest -q --cov"

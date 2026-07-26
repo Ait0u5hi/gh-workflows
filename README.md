@@ -30,17 +30,47 @@ One-time repo setting (admin, web UI): *Settings → Actions → General →
 Access → "Accessible from repositories owned by Ait0u5hi"* — without it every
 caller fails at workflow-resolution time.
 
+## Adopt in 2 minutes
+
+Standard CI for a new repo — no governance, no Hermes coupling:
+
+1. Copy `templates/python/ci.yml` **or** `templates/node/ci.yml` → `.github/workflows/ci.yml`
+2. Copy `templates/codeql.yml` → `.github/workflows/codeql.yml` (SAST; reports on public repos)
+3. Copy `templates/osv.yml` → `.github/workflows/osv.yml` (dependency CVEs)
+4. Copy `templates/zizmor.yml` → `.github/zizmor.yml`
+5. *Settings → Actions → General → Access →* allow "Accessible from repositories owned by Ait0u5hi"
+
+Done. To also adopt the org governance standard, add `templates/pr-governance.yml`
+(see [Org governance](#org-governance-opt-in) and [Contribution governance](#contribution-governance)).
+
 ## Reusable workflows
+
+### Generic CI (adopt anywhere)
+
+Standard, project-agnostic CI. None of these pull in Ait0u5hi-specific
+governance — adopt them in any repo, yours or otherwise.
 
 | Workflow | What it runs | Key inputs (defaults) |
 |---|---|---|
-| `reusable-python-validation.yml` | ruff (repo's `ruff.toml`), optional plugin.yaml validate + compileall, meta-lint (actionlint + yamllint + zizmor) | `python-version` (3.10), `plugin-validate` (false), `meta-lint` (true) |
-| `reusable-python-eval.yml` | pytest with test-existence guard (skips cleanly until tests exist) | `python-version` (3.10), `extra-deps` (pyyaml) |
-| `reusable-security.yml` | gitleaks over full history — caller must grant `pull-requests: read` | — |
+| `reusable-python-ci.yml` | ruff lint (once) + pytest across a **version matrix**; test-existence guard skips cleanly until tests exist. **No plugin.yaml coupling** — the generic Python entry point | `python-versions` (`["3.10","3.11","3.12","3.13"]`), `run-ruff` (true), `test-command` (""), `extra-deps` ("") |
+| `reusable-node-ci.yml` | setup-node + npm cache, `npm ci`, build/typecheck `--if-present`, optional test command; optional **version matrix** | `node-version` ("" = use matrix), `node-versions` (`["20","22"]`), `run-build` (true), `run-typecheck` (false), `test-command` ("") |
+| `reusable-python-eval.yml` | pytest with test-existence guard, single version. Kept for existing callers — new repos should prefer `reusable-python-ci.yml` (adds ruff + a matrix) | `python-version` (3.10), `extra-deps` (pyyaml) |
+| `reusable-codeql.yml` | CodeQL code scanning (SAST), matrix by language; SARIF to the Security tab. **Public repos only** — auto-skips on private personal repos (no GitHub Advanced Security). Caller grants `security-events: write` | `languages` (`["python"]`), `build-mode` (none) |
+| `reusable-security.yml` | gitleaks secret scan over full history — caller must grant `pull-requests: read` | — |
 | `reusable-osv.yml` | OSV-Scanner dependency-CVE scan; SARIF to the Security tab — caller must grant `security-events: write`. Language-agnostic (auto-detects manifests) | `scan-args` (`--recursive .`), `fail-on-vuln` (false) |
-| `reusable-release.yml` | git-cliff release notes + CHANGELOG regen + GitHub Release; needs caller `cliff.toml`, `contents: write` | `plugin-manifest` (false — sync plugin.yaml version) |
-| `reusable-node-ci.yml` | setup-node + npm cache, `npm ci`, build/typecheck `--if-present`, optional test command | `node-version` (22), `run-build` (true), `run-typecheck` (false), `test-command` ("") |
 | `reusable-deep-lint.yml` | super-linter slim, full codebase, whitelist: ruff/yaml/actions/bash/markdown. Weekly + dispatch only — never per-PR (image pull burns metered private-repo minutes) | — |
+| `reusable-release.yml` | git-cliff release notes + CHANGELOG regen + GitHub Release; needs caller `cliff.toml`, `contents: write` | `plugin-manifest` (false — sync plugin.yaml version) |
+
+### Org governance (opt-in)
+
+Ait0u5hi-specific contribution governance. **Generic consumers never inherit
+these** — they live behind separate reusables and opt-in boolean inputs, and are
+distributed via separate templates (`templates/pr-governance.yml`,
+`templates/python-plugin/`). Adopt only when you want the org standard.
+
+| Workflow | What it runs | Key inputs (defaults) |
+|---|---|---|
+| `reusable-python-validation.yml` | ruff (repo's `ruff.toml`) + meta-lint (actionlint + yamllint + zizmor); the **`plugin-validate` path** (Hermes `plugin.yaml` keys + compileall) is opt-in governance | `python-version` (3.10), `plugin-validate` (false), `meta-lint` (true) |
 | `reusable-contributor-check.yml` | fails a PR whose commit author emails aren't mapped under `contributors/emails/<email>` (add with `scripts/add_contributor.py`); bots auto-resolve | `base-ref` (main) |
 | `reusable-crossplatform-lint.yml` | scans changed Python for Windows footguns via `scripts/check-windows-footguns.py`; suppress a platform-gated line with `# windows-footgun: ok` | `gh-workflows-ref` (main), `base-ref` (main) |
 
@@ -76,8 +106,10 @@ Reference intra-org, ref-pinned (`@v1`), same as the reusables:
 
 ## Templates
 
-- `templates/python-plugin/` — validation, eval, security, release (Hermes plugin repos)
+- `templates/python/ci.yml` — **generic** Python CI (ruff + pytest matrix, no plugin coupling)
 - `templates/node/ci.yml` — Node/npm-workspaces CI
+- `templates/codeql.yml` — CodeQL code scanning (SAST); reports on public repos, skips on private
+- `templates/python-plugin/` — validation, eval, security, release (Hermes plugin repos)
 - `templates/deep-lint.yml` — weekly super-linter sweep
 - `templates/osv.yml` — dependency-CVE scan (copy to `.github/workflows/`)
 - `templates/dependabot.yml` — copy to `.github/dependabot.yml`; keeps SHA-pinned
@@ -115,3 +147,9 @@ from `ci/node.js.yml`; the Python starters (flake8-based) were rejected in
 favor of the already-hardened ruff setup; super-linter runs weekly instead of
 per-PR; zizmor was adopted into meta-lint as the one super-linter component
 the targeted setup lacked.
+
+Distribution is copy-a-stub + reusable `workflow_call` (works on a personal
+account). GitHub's native *New workflow* starter picker is Organization-only;
+if Ait0u5hi ever becomes an org, [`docs/org-migration.md`](docs/org-migration.md)
+documents the exact `.github/workflow-templates/` layout to surface these as
+starter workflows.

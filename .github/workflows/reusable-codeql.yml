@@ -1,0 +1,66 @@
+# Reusable: CodeQL code scanning (SAST). Matrix by CodeQL language; results go
+# to the Security tab (Code Scanning). Based on actions/starter-workflows
+# code-scanning/codeql.yml, SHA-pinned to this library's convention.
+#
+# GitHub Advanced Security gate: CodeQL / SARIF upload requires GHAS, which is
+# free on PUBLIC repos but unavailable on personal-account PRIVATE repos. The
+# job `if` skips analysis on private repos (visibility != 'private' so public
+# and internal still run, and an empty value on some scheduled events errs to
+# running), and continue-on-error means a missing-GHAS edge case never red-X's a
+# run — same tolerance as reusable-osv.yml.
+#
+# Caller stub must grant: security-events: write, actions: read, contents: read.
+# See templates/codeql.yml.
+name: Reusable CodeQL
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        type: string
+        default: ubuntu-latest
+      languages:
+        description: >-
+          JSON array of CodeQL languages. Default is python-only so a pure-
+          Python repo does not get a failing "no source found" job; add more,
+          e.g. '["python","javascript-typescript"]'.
+        type: string
+        default: '["python"]'
+      build-mode:
+        description: CodeQL build-mode (`none` for interpreted languages).
+        type: string
+        default: none
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    # Skip on private repos (no GHAS on personal accounts); public/internal run.
+    if: ${{ github.event.repository.visibility != 'private' }}
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 30
+    # Belt-and-suspenders: never fail the run if SARIF upload is unavailable.
+    continue-on-error: true
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJSON(inputs.languages) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          persist-credentials: false
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@e0647621c2984b5ed2f768cb892365bf2a616ad1 # v4.37.2
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ inputs.build-mode }}
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@e0647621c2984b5ed2f768cb892365bf2a616ad1 # v4.37.2
+        with:
+          category: "/language:${{ matrix.language }}"
