@@ -1,0 +1,31 @@
+# Copy to .github/workflows/codeql.yml. CodeQL code scanning (SAST) — findings
+# land in the Security tab. NOTE: only reports on PUBLIC repos; on private
+# personal repos it skips cleanly (code scanning needs GitHub Advanced Security,
+# which personal accounts lack). The security-events:write grant is required for
+# the SARIF upload.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly scan against main — catches issues in code that hasn't changed.
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  codeql:
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-codeql.yml@v1
+    # with:
+    #   languages: '["python","javascript-typescript"]'   # add JS/TS analysis
