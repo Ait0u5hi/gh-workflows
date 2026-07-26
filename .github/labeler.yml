@@ -1,0 +1,13 @@
+# Config for actions/labeler@v5 (referenced by .github/workflows/label.yml).
+# v5 syntax: changed-files / any-glob-to-any-file. See templates/automation/labeler.yml.
+docs:
+  - changed-files:
+      - any-glob-to-any-file: ["**/*.md", "docs/**"]
+
+workflows:
+  - changed-files:
+      - any-glob-to-any-file: [".github/workflows/**"]
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file: ["tests/**", "**/test_*.py", "**/*_test.py"]
