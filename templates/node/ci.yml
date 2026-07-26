@@ -18,6 +18,9 @@ jobs:
   ci:
     uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-node-ci.yml@v1
     with:
+      # Single version (legacy): keep node-version set for one job.
       node-version: "22"
+      # Or test a matrix — leave node-version unset (remove the line above) and:
+      # node-versions: '["20","22"]'
       # run-typecheck: true   # enable once the repo's typecheck baseline is green/budgeted
       # test-command: "npm test --workspaces --if-present"

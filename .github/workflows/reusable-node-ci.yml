@@ -1,6 +1,6 @@
 # Reusable: Node.js CI (npm workspaces friendly). Based on the
-# actions/starter-workflows ci/node.js.yml template, single-version.
-# Callers: see templates/node/ci.yml
+# actions/starter-workflows ci/node.js.yml template, with an optional version
+# matrix. Callers: see templates/node/ci.yml
 name: Reusable Node CI
 
 on:
@@ -10,8 +10,17 @@ on:
         type: string
         default: ubuntu-latest
       node-version:
+        description: >-
+          Legacy single version. If set (non-empty) it OVERRIDES node-versions
+          and runs one job — preserves existing single-version callers.
         type: string
-        default: "22"
+        default: ""
+      node-versions:
+        description: >-
+          JSON array of Node versions for the build matrix, e.g. '["20","22"]'.
+          Used only when node-version is empty.
+        type: string
+        default: '["20","22"]'
       run-build:
         type: boolean
         default: true
@@ -32,16 +41,23 @@ permissions:
 
 jobs:
   build:
-    name: node ${{ inputs.node-version }}
+    name: node ${{ matrix.node-version }}
     runs-on: ${{ inputs.runs-on }}
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # Scalar node-version (non-empty) wins as a single-element matrix —
+        # keeps existing single-version callers byte-identical; otherwise the
+        # node-versions JSON array applies.
+        node-version: ${{ fromJSON(inputs.node-version != '' && format('["{0}"]', inputs.node-version) || inputs.node-versions) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: ${{ inputs.node-version }}
+          node-version: ${{ matrix.node-version }}
           cache: npm
       - name: Install dependencies
         env:
