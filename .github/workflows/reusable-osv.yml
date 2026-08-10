@@ -59,7 +59,7 @@ jobs:
           persist-credentials: false
 
       - name: Run scanner
-        uses: google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+        uses: google/osv-scanner-action/osv-scanner-action@8deb546fdb875b9996d27d4950be7312dac076a1 # v2.5.0
         with:
           scan-args: |-
             --output=results.json
@@ -68,7 +68,7 @@ jobs:
         continue-on-error: true
 
       - name: Generate SARIF report
-        uses: google/osv-scanner-action/osv-reporter-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+        uses: google/osv-scanner-action/osv-reporter-action@8deb546fdb875b9996d27d4950be7312dac076a1 # v2.5.0
         with:
           scan-args: |-
             --output=results.sarif
@@ -93,7 +93,7 @@ jobs:
         # gates the job independently of the dashboard.
         continue-on-error: true
         if: ${{ !cancelled() }}
-        uses: github/codeql-action/upload-sarif@e0647621c2984b5ed2f768cb892365bf2a616ad1 # v4.37.2
+        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         with:
           sarif_file: results.sarif
 
