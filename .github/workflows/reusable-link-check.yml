@@ -1,0 +1,52 @@
+# Reusable: markdown/docs link checker via lychee. No third-party marketplace
+# action: the lychee release binary is downloaded at a pinned version and
+# verified against an embedded SHA-256 before it runs, so a silently-swapped
+# release asset fails the job. Run weekly + on dispatch (external links flap;
+# keep it off the per-PR blocking path). Callers: see templates/link-check.yml.
+name: Reusable Link Check
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        type: string
+        default: ubuntu-latest
+      args:
+        description: Arguments passed to lychee (paths/globs to check).
+        type: string
+        default: "--no-progress './**/*.md'"
+
+permissions:
+  contents: read
+
+jobs:
+  link-check:
+    name: lychee
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install lychee (pinned version + SHA-256 verified)
+        env:
+          # lychee v0.24.2, x86_64-unknown-linux-gnu
+          LYCHEE_VERSION: v0.24.2
+          LYCHEE_SHA256: 1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          tarball="lychee-x86_64-unknown-linux-gnu.tar.gz"
+          url="https://github.com/lycheeverse/lychee/releases/download/lychee-${LYCHEE_VERSION}/${tarball}"
+          curl -sSfL -o "$tarball" "$url"
+          echo "${LYCHEE_SHA256}  ${tarball}" | sha256sum -c -
+          # The binary lives under a versioned dir in the tarball; strip it.
+          tar -xzf "$tarball" --strip-components=1 lychee-x86_64-unknown-linux-gnu/lychee
+          install -m 0755 lychee "$HOME/.local/bin/lychee"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Run lychee
+        env:
+          LYCHEE_ARGS: ${{ inputs.args }}
+        run: |
+          # shellcheck disable=SC2086  # LYCHEE_ARGS is intentionally word-split
+          lychee $LYCHEE_ARGS
