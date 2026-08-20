@@ -1,0 +1,87 @@
+# Reusable: content scan. Greps the tree for caller-supplied patterns
+# (private hostnames, internal jargon, journal-voice phrases, etc.) that
+# would leak in a public repo but that gitleaks does not flag because
+# they are not secrets.
+#
+# The pattern file lives in the CALLER repo (default
+# .github/content-scan-patterns.txt) — this reusable ships no wordlist,
+# so gh-workflows itself stays free of any consumer's private tokens.
+#
+# Pattern file format: one ripgrep regex per line. `#` starts a line
+# comment. Blank lines and comment lines are ignored.
+#
+# Caller stub: see templates/content-scan.yml.
+name: Reusable Content Scan
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        type: string
+        default: ubuntu-latest
+      patterns-file:
+        type: string
+        default: .github/content-scan-patterns.txt
+        description: Path (in the caller repo) to the ripgrep patterns file.
+      paths:
+        type: string
+        default: .
+        description: Space-separated paths to scan. Defaults to the whole tree.
+
+permissions:
+  contents: read
+
+jobs:
+  content-scan:
+    name: content-scan
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          persist-credentials: false
+
+      - name: Verify patterns file exists
+        env:
+          PATTERNS_FILE: ${{ inputs.patterns-file }}
+        run: |
+          if [ ! -f "$PATTERNS_FILE" ]; then
+            echo "::error::patterns file not found at $PATTERNS_FILE"
+            echo "Create it in the caller repo, or set patterns-file to another path."
+            exit 1
+          fi
+          echo "Using patterns file: $PATTERNS_FILE"
+          echo "Active patterns (comments/blanks stripped):"
+          grep -vE '^\s*(#|$)' "$PATTERNS_FILE" | sed 's/^/  /'
+
+      - name: Scan tree for forbidden content
+        env:
+          PATTERNS_FILE: ${{ inputs.patterns-file }}
+          SCAN_PATHS: ${{ inputs.paths }}
+        run: |
+          set -uo pipefail
+          # Strip comments and blank lines into a runtime pattern file.
+          RUNTIME_PATTERNS=$(mktemp)
+          trap 'rm -f "$RUNTIME_PATTERNS"' EXIT
+          grep -vE '^\s*(#|$)' "$PATTERNS_FILE" > "$RUNTIME_PATTERNS"
+          if [ ! -s "$RUNTIME_PATTERNS" ]; then
+            echo "No active patterns in $PATTERNS_FILE — nothing to scan."
+            exit 0
+          fi
+          # rg -f: patterns from file. -n: line numbers. --hidden: include
+          # dotfiles. --glob '!.git': skip git internals. -S: smart case.
+          # Exit status: 0 = matches, 1 = no matches, 2 = error. We invert:
+          # matches → fail; no matches → pass; error → surface.
+          # shellcheck disable=SC2086
+          if rg -n -S --hidden --glob '!.git' -f "$RUNTIME_PATTERNS" $SCAN_PATHS; then
+            echo
+            echo "::error::content-scan found forbidden patterns above. Remove them, or update $PATTERNS_FILE if the pattern is stale."
+            exit 1
+          fi
+          rc=$?
+          if [ "$rc" = "1" ]; then
+            echo "content-scan clean."
+            exit 0
+          fi
+          echo "::error::ripgrep exited with $rc"
+          exit "$rc"
