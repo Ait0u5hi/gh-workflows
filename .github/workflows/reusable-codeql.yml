@@ -6,8 +6,10 @@
 # free on PUBLIC repos but unavailable on personal-account PRIVATE repos. The
 # job `if` skips analysis on private repos (visibility != 'private' so public
 # and internal still run, and an empty value on some scheduled events errs to
-# running), and continue-on-error means a missing-GHAS edge case never red-X's a
-# run — same tolerance as reusable-osv.yml.
+# running). The SARIF-upload step (only) is continue-on-error, so a private repo
+# that slips past the visibility skip warns instead of red-X'ing — while a
+# genuine misconfig in Initialize CodeQL still fails the job. Same upload
+# tolerance as reusable-osv.yml.
 #
 # Caller stub must grant: security-events: write, actions: read, contents: read.
 # See templates/codeql.yml.
@@ -41,8 +43,6 @@ jobs:
     if: ${{ github.event.repository.visibility != 'private' }}
     runs-on: ${{ inputs.runs-on }}
     timeout-minutes: 30
-    # Belt-and-suspenders: never fail the run if SARIF upload is unavailable.
-    continue-on-error: true
     permissions:
       security-events: write
       actions: read
@@ -61,6 +61,11 @@ jobs:
           languages: ${{ matrix.language }}
           build-mode: ${{ inputs.build-mode }}
       - name: Perform CodeQL Analysis
+        # Tolerated (not the whole job): the analyze step also uploads SARIF,
+        # which needs GHAS — free on public repos but absent on a private
+        # personal repo that slipped past the visibility skip. Init failures
+        # (unsupported language, bad build-mode) still fail the job.
+        continue-on-error: true
         uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         with:
           category: "/language:${{ matrix.language }}"
