@@ -10,8 +10,12 @@ on:
       runs-on:
         type: string
         default: ubuntu-latest
+      default-branch:
+        description: Branch to check out and push the changelog commit back to.
+        type: string
+        default: main
       plugin-manifest:
-        description: Sync plugin.yaml version to the tag and commit back to main (Hermes plugin repos)
+        description: Sync plugin.yaml version to the tag and commit back to the default branch (Hermes plugin repos)
         type: boolean
         default: false
 
@@ -27,7 +31,7 @@ jobs:
       # commit back to main.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # zizmor: ignore[artipacked] # v4
         with:
-          ref: main
+          ref: ${{ inputs.default-branch }}
           fetch-depth: 0
           fetch-tags: true
 
@@ -47,8 +51,10 @@ jobs:
         env:
           OUTPUT: CHANGELOG.md
 
-      - name: Sync plugin.yaml version and commit back to main
+      - name: Sync plugin.yaml version and commit back to the default branch
         if: ${{ inputs.plugin-manifest }}
+        env:
+          DEFAULT_BRANCH: ${{ inputs.default-branch }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           sed -i -E "s/^version: \".*\"/version: \"${VERSION}\"/" plugin.yaml
@@ -59,11 +65,13 @@ jobs:
             echo "nothing to commit"
           else
             git commit -m "chore(release): ${GITHUB_REF_NAME} changelog + version sync [skip ci]"
-            git push origin main
+            git push origin "HEAD:${DEFAULT_BRANCH}"
           fi
 
-      - name: Commit CHANGELOG.md back to main
+      - name: Commit CHANGELOG.md back to the default branch
         if: ${{ !inputs.plugin-manifest }}
+        env:
+          DEFAULT_BRANCH: ${{ inputs.default-branch }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -72,7 +80,7 @@ jobs:
             echo "nothing to commit"
           else
             git commit -m "chore(release): ${GITHUB_REF_NAME} changelog [skip ci]"
-            git push origin main
+            git push origin "HEAD:${DEFAULT_BRANCH}"
           fi
 
       - name: Create GitHub Release
