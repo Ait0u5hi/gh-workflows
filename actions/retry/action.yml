@@ -9,6 +9,13 @@ description: >-
   instead of needing a manual re-run. Can also capture stdout as a step
   output for commands whose result must be consumed by later steps.
 
+# Marketplace metadata: harmless while referenced by path; ready if this action
+# is ever extracted to its own repo for a Marketplace listing (see
+# docs/marketplace-research.md).
+branding:
+  icon: repeat
+  color: blue
+
 inputs:
   command:
     description: Shell command to run (and retry).
