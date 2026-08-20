@@ -69,11 +69,12 @@ jobs:
             exit 0
           fi
           # rg -f: patterns from file. -n: line numbers. --hidden: include
-          # dotfiles. --glob '!.git': skip git internals. -S: smart case.
-          # Exit status: 0 = matches, 1 = no matches, 2 = error. We invert:
-          # matches → fail; no matches → pass; error → surface.
+          # dotfiles. --glob '!.git': skip git internals. The patterns file
+          # itself is excluded so its own regexes do not self-match. -S:
+          # smart case. Exit status: 0 = matches, 1 = no matches, 2 = error.
+          # We invert: matches → fail; no matches → pass; error → surface.
           # shellcheck disable=SC2086
-          if rg -n -S --hidden --glob '!.git' -f "$RUNTIME_PATTERNS" $SCAN_PATHS; then
+          if rg -n -S --hidden --glob '!.git' --glob "!$PATTERNS_FILE" -f "$RUNTIME_PATTERNS" $SCAN_PATHS; then
             echo
             echo "::error::content-scan found forbidden patterns above. Remove them, or update $PATTERNS_FILE if the pattern is stale."
             exit 1
