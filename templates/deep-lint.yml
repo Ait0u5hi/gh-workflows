@@ -1,6 +1,6 @@
 # Copy to .github/workflows/deep-lint.yml. Weekly + manual only — super-linter
-# pulls a large Docker image per run; keep it off the per-PR path (private
-# repos burn metered Actions minutes).
+# pulls a large Docker image per run; keep it off the per-PR path (the image
+# pull is minutes of wall-clock every run).
 name: Deep Lint
 
 on:
