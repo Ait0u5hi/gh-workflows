@@ -59,7 +59,7 @@ governance — adopt them in any repo, yours or otherwise.
 
 | Workflow | What it runs | Key inputs (defaults) |
 |---|---|---|
-| `reusable-python-ci.yml` | ruff lint (once) + pytest across a **version matrix**; test-existence guard skips cleanly until tests exist. **No plugin.yaml coupling** — the generic Python entry point | `python-versions` (`["3.10","3.11","3.12","3.13"]`), `run-ruff` (true), `test-command` (""), `extra-deps` ("") |
+| `reusable-python-ci.yml` | ruff lint (once) + pytest across a **version matrix**; test-existence guard skips cleanly until tests exist. **No plugin.yaml coupling** — the generic Python entry point | `python-versions` (`["3.10","3.11","3.12","3.13"]`), `run-ruff` (true), `test-command` (""), `extra-deps` (""), `upload-coverage` (false — pytest-cov → `coverage.xml` artifact, no external service) |
 | `reusable-node-ci.yml` | setup-node + npm cache, `npm ci`, build/typecheck `--if-present`, optional test command; optional **version matrix** | `node-version` ("" = use matrix), `node-versions` (`["20","22"]`), `run-build` (true), `run-typecheck` (false), `test-command` ("") |
 | `reusable-go-ci.yml` | `go build` + `go vet` + `go test` across a Go **version matrix** (`-race` opt-out); optional golangci-lint (installer SHA-pinned). No third-party actions — first-party `setup-go` + toolchain only. No-module guard skips cleanly | `go-versions` (`["stable"]`), `run-vet` (true), `run-race` (true), `run-lint` (false) |
 | `reusable-pr-title.yml` | enforce a Conventional-Commits PR title (the squash-merge subject) via **pure inline bash** — no third-party action. Complements the commit-message convention CONTRIBUTING already requires | `types` (`feat\|fix\|docs\|…`) |
@@ -68,6 +68,9 @@ governance — adopt them in any repo, yours or otherwise.
 | `reusable-security.yml` | gitleaks secret scan over full history — caller must grant `pull-requests: read`. **Org adopters:** `gitleaks-action` needs a `GITLEAKS_LICENSE` secret for organizations (free for individual accounts + public repos) | — |
 | `reusable-content-scan.yml` | ripgrep sweep for **caller-supplied** patterns (private hostnames, internal jargon, journal-voice phrases). Ships no wordlist — the pattern file lives in the caller repo, so gh-workflows stays free of consumer-private tokens. Complements gitleaks: catches leaks that are not secrets | `patterns-file` (`.github/content-scan-patterns.txt`), `paths` (`.`) |
 | `reusable-osv.yml` | OSV-Scanner dependency-CVE scan; SARIF to the Security tab — caller must grant `security-events: write`. Language-agnostic (auto-detects manifests) | `scan-args` (`--recursive .`), `fail-on-vuln` (false) |
+| `reusable-dependency-review.yml` | first-party `dependency-review-action` — blocks a PR that adds a vulnerable/disallowed dep. Needs the Dependency Graph (default-on for public repos) | `fail-on-severity` (high) |
+| `reusable-spellcheck.yml` | codespell over the repo (pinned pip install, no action). Reads `.codespellrc` / `[tool.codespell]` for ignores | `codespell-args` ("") |
+| `reusable-link-check.yml` | lychee link check — the release binary is pinned + **SHA-256 verified** before it runs (no action). Weekly/dispatch (external links flap) | `args` (`--no-progress './**/*.md'`) |
 | `reusable-deep-lint.yml` | super-linter slim, full codebase, whitelist: ruff/yaml/actions/bash/markdown. Weekly + dispatch only — never per-PR (image pull burns metered private-repo minutes) | — |
 | `reusable-release.yml` | git-cliff release notes + CHANGELOG regen + GitHub Release; needs caller `cliff.toml`, `contents: write` | `plugin-manifest` (false — sync plugin.yaml version) |
 
@@ -120,6 +123,8 @@ Reference intra-org, ref-pinned (`@v1`), same as the reusables:
 - `templates/node/ci.yml` — Node/npm-workspaces CI
 - `templates/go/ci.yml` — Go CI (build + vet + test matrix, opt-in golangci-lint)
 - `templates/pr-title.yml` — Conventional-Commits PR-title check
+- `templates/dependency-review.yml` — block PRs adding vulnerable deps
+- `templates/spellcheck.yml` — codespell; `templates/link-check.yml` — lychee (weekly)
 - `templates/codeql.yml` — CodeQL code scanning (SAST); reports on public repos, skips on private
 - `templates/python-plugin/` — validation, eval, security, release (Hermes plugin repos)
 - `templates/deep-lint.yml` — weekly super-linter sweep

@@ -29,6 +29,13 @@ on:
         description: Space-separated pip packages installed alongside pytest.
         type: string
         default: ""
+      upload-coverage:
+        description: >-
+          Collect coverage (pytest-cov) and upload coverage.xml as a build
+          artifact. No external service — download the artifact or wire it into
+          your own gate. Ignored when test-command is overridden.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -75,18 +82,34 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: ${{ steps.detect.outputs.cache }}
       - name: Run tests (skips cleanly until tests exist)
+        id: tests
         env:
           EXTRA_DEPS: ${{ inputs.extra-deps }}
           TEST_COMMAND: ${{ inputs.test-command }}
+          UPLOAD_COVERAGE: ${{ inputs.upload-coverage }}
         run: |
           if [ -d tests ] || compgen -G "test_*.py" >/dev/null || compgen -G "*_test.py" >/dev/null; then
-            # shellcheck disable=SC2086  # EXTRA_DEPS is intentionally word-split
-            pip install --quiet pytest $EXTRA_DEPS
             if [ -n "$TEST_COMMAND" ]; then
+              # shellcheck disable=SC2086  # EXTRA_DEPS is intentionally word-split
+              pip install --quiet pytest $EXTRA_DEPS
               bash -c "$TEST_COMMAND"
+            elif [ "$UPLOAD_COVERAGE" = "true" ]; then
+              # shellcheck disable=SC2086
+              pip install --quiet pytest pytest-cov $EXTRA_DEPS
+              python -m pytest -q --cov --cov-report=xml --cov-report=term-missing
+              echo "coverage=true" >> "$GITHUB_OUTPUT"
             else
+              # shellcheck disable=SC2086
+              pip install --quiet pytest $EXTRA_DEPS
               python -m pytest -q
             fi
           else
             echo "no tests yet — nothing to run"
           fi
+      - name: Upload coverage artifact
+        if: ${{ steps.tests.outputs.coverage == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-python-${{ matrix.python-version }}
+          path: coverage.xml
+          retention-days: 5
