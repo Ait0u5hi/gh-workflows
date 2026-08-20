@@ -1,0 +1,111 @@
+# Reusable: generic Go CI — build + vet + test across a Go version matrix, with
+# opt-in golangci-lint. No third-party marketplace actions: only first-party
+# actions/setup-go, the built-in go toolchain, and a golangci-lint install
+# pinned by installer commit SHA + version (the install.sh verifies the binary
+# checksum). See docs/marketplace-research.md for the dependency-minimization
+# rationale. Callers: see templates/go/ci.yml.
+name: Reusable Go CI
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        type: string
+        default: ubuntu-latest
+      go-versions:
+        description: JSON array of Go versions for the matrix (setup-go syntax; "stable"/"oldstable"/"1.24" all valid).
+        type: string
+        default: '["stable"]'
+      run-vet:
+        description: Run `go vet ./...`.
+        type: boolean
+        default: true
+      run-race:
+        description: Run tests with the race detector (`-race`).
+        type: boolean
+        default: true
+      run-lint:
+        description: Run golangci-lint (needs a .golangci.yml in the repo).
+        type: boolean
+        default: false
+      golangci-version:
+        description: golangci-lint version to install (must match the pinned installer below).
+        type: string
+        default: v2.13.0
+      test-command:
+        description: Override the test command (default `go test [-race] ./...`).
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: build + test (go ${{ matrix.go }})
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ${{ fromJSON(inputs.go-versions) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ matrix.go }}
+      - name: Guard — skip cleanly if no Go module
+        id: guard
+        run: |
+          if [ -f go.mod ]; then
+            echo "has_module=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::no go.mod at repo root — skipping Go build/test"
+            echo "has_module=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: go build
+        if: steps.guard.outputs.has_module == 'true'
+        run: go build ./...
+      - name: go vet
+        if: ${{ steps.guard.outputs.has_module == 'true' && inputs.run-vet }}
+        run: go vet ./...
+      - name: go test
+        if: steps.guard.outputs.has_module == 'true'
+        env:
+          TEST_COMMAND: ${{ inputs.test-command }}
+          RUN_RACE: ${{ inputs.run-race }}
+        run: |
+          if [ -n "$TEST_COMMAND" ]; then
+            bash -c "$TEST_COMMAND"
+          elif [ "$RUN_RACE" = "true" ]; then
+            go test -race ./...
+          else
+            go test ./...
+          fi
+
+  lint:
+    name: golangci-lint
+    if: ${{ inputs.run-lint }}
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+      - name: Install golangci-lint (installer pinned by commit SHA)
+        # install.sh fetched by immutable commit SHA (not a moving tag/branch); it
+        # verifies the downloaded binary's checksum. golangci-lint v2.13.0.
+        env:
+          GOLANGCI_INSTALLER_SHA: f838df1edb6265abbfa24f5cbb7381b21c735642
+          GOLANGCI_VERSION: ${{ inputs.golangci-version }}
+        run: |
+          installer="https://raw.githubusercontent.com/golangci/golangci-lint/${GOLANGCI_INSTALLER_SHA}/install.sh"
+          curl -sSfL "$installer" | sh -s -- -b "$(go env GOPATH)/bin" "$GOLANGCI_VERSION"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Run golangci-lint
+        run: golangci-lint run ./...

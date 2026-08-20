@@ -61,6 +61,8 @@ governance — adopt them in any repo, yours or otherwise.
 |---|---|---|
 | `reusable-python-ci.yml` | ruff lint (once) + pytest across a **version matrix**; test-existence guard skips cleanly until tests exist. **No plugin.yaml coupling** — the generic Python entry point | `python-versions` (`["3.10","3.11","3.12","3.13"]`), `run-ruff` (true), `test-command` (""), `extra-deps` ("") |
 | `reusable-node-ci.yml` | setup-node + npm cache, `npm ci`, build/typecheck `--if-present`, optional test command; optional **version matrix** | `node-version` ("" = use matrix), `node-versions` (`["20","22"]`), `run-build` (true), `run-typecheck` (false), `test-command` ("") |
+| `reusable-go-ci.yml` | `go build` + `go vet` + `go test` across a Go **version matrix** (`-race` opt-out); optional golangci-lint (installer SHA-pinned). No third-party actions — first-party `setup-go` + toolchain only. No-module guard skips cleanly | `go-versions` (`["stable"]`), `run-vet` (true), `run-race` (true), `run-lint` (false) |
+| `reusable-pr-title.yml` | enforce a Conventional-Commits PR title (the squash-merge subject) via **pure inline bash** — no third-party action. Complements the commit-message convention CONTRIBUTING already requires | `types` (`feat\|fix\|docs\|…`) |
 | `reusable-python-eval.yml` | pytest with test-existence guard, single version. Kept for existing callers — new repos should prefer `reusable-python-ci.yml` (adds ruff + a matrix) | `python-version` (3.10), `extra-deps` (pyyaml) |
 | `reusable-codeql.yml` | CodeQL code scanning (SAST), matrix by language; SARIF to the Security tab. **Public repos only** — auto-skips on private personal repos (no GitHub Advanced Security). Caller grants `security-events: write` | `languages` (`["python"]`), `build-mode` (none) |
 | `reusable-security.yml` | gitleaks secret scan over full history — caller must grant `pull-requests: read`. **Org adopters:** `gitleaks-action` needs a `GITLEAKS_LICENSE` secret for organizations (free for individual accounts + public repos) | — |
@@ -116,6 +118,8 @@ Reference intra-org, ref-pinned (`@v1`), same as the reusables:
 
 - `templates/python/ci.yml` — **generic** Python CI (ruff + pytest matrix, no plugin coupling)
 - `templates/node/ci.yml` — Node/npm-workspaces CI
+- `templates/go/ci.yml` — Go CI (build + vet + test matrix, opt-in golangci-lint)
+- `templates/pr-title.yml` — Conventional-Commits PR-title check
 - `templates/codeql.yml` — CodeQL code scanning (SAST); reports on public repos, skips on private
 - `templates/python-plugin/` — validation, eval, security, release (Hermes plugin repos)
 - `templates/deep-lint.yml` — weekly super-linter sweep
