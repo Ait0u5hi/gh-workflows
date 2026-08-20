@@ -1,0 +1,16 @@
+# Copy to .github/workflows/pr-title.yml. Enforces a Conventional-Commits PR
+# title (the squash-merge subject). Needs pull_request_target-free perms.
+name: PR Title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-title:
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-pr-title.yml@v1
+    # with:
+    #   types: "feat|fix|docs|chore|ci|refactor|test"   # narrow the allowed set

@@ -1,0 +1,43 @@
+# Reusable: enforce a Conventional-Commits PR title. This repo's CONTRIBUTING
+# requires conventional commits but nothing enforced PR titles (which become the
+# squash-merge commit subject). Pure inline bash — no third-party marketplace
+# action — so there is zero supply-chain surface for a check that reads an
+# attacker-influenceable value (the PR title). Callers: see templates/pr-title.yml.
+name: Reusable PR Title Lint
+
+on:
+  workflow_call:
+    inputs:
+      types:
+        description: Pipe-separated allowed Conventional-Commit types.
+        type: string
+        default: feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert
+
+permissions:
+  contents: read
+
+jobs:
+  lint-title:
+    name: conventional PR title
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check PR title
+        # Title comes through env, never interpolated into the script body, so a
+        # title with quotes/backticks/specials can neither break the regex step
+        # nor inject into the runner.
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          TYPES: ${{ inputs.types }}
+        run: |
+          set -uo pipefail
+          # <type>[optional (scope)][optional !]: <subject>
+          pattern="^(${TYPES})(\([a-z0-9._-]+\))?!?: .+"
+          if printf '%s' "$PR_TITLE" | grep -qiE "$pattern"; then
+            echo "PR title OK: $PR_TITLE"
+          else
+            echo "::error::PR title is not a Conventional Commit: '$PR_TITLE'"
+            echo "Expected: <type>(optional-scope): subject"
+            echo "Allowed types: ${TYPES//|/, }"
+            exit 1
+          fi
