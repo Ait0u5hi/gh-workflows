@@ -87,10 +87,10 @@ jobs:
 
       - name: Upload to code scanning
         # Non-fatal: SARIF upload to the code-scanning dashboard requires GitHub
-        # Advanced Security, which is free on public repos but not enabled on our
-        # private ones. Where it isn't available this warns instead of failing;
-        # findings still ship as the SARIF artifact above, and `fail-on-vuln`
-        # gates the job independently of the dashboard.
+        # Advanced Security, which is free on public repos but not enabled on
+        # private personal-account repos. Where it isn't available this warns
+        # instead of failing; findings still ship as the SARIF artifact above,
+        # and `fail-on-vuln` gates the job independently of the dashboard.
         continue-on-error: true
         if: ${{ !cancelled() }}
         uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6

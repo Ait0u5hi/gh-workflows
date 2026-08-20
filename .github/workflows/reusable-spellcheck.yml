@@ -1,0 +1,37 @@
+# Reusable: source/docs spellcheck via codespell. Uses a pinned pip install
+# (same trust model as this repo's yamllint/zizmor meta-lint) rather than a
+# third-party marketplace action or an unpinned binary download. codespell reads
+# .codespellrc / [tool.codespell] in the caller repo for ignores.
+# Callers: see templates/spellcheck.yml.
+name: Reusable Spellcheck
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        type: string
+        default: ubuntu-latest
+      codespell-args:
+        description: Extra args passed to codespell (e.g. "--skip=*.lock -L crate,ba").
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  spellcheck:
+    name: codespell
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run codespell
+        env:
+          CODESPELL_ARGS: ${{ inputs.codespell-args }}
+        run: |
+          pip install --quiet codespell==2.4.3
+          # shellcheck disable=SC2086  # CODESPELL_ARGS is intentionally word-split
+          codespell $CODESPELL_ARGS

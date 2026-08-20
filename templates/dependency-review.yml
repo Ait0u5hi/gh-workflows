@@ -1,0 +1,16 @@
+# Copy to .github/workflows/dependency-review.yml. Blocks PRs that add a
+# vulnerable dependency. Needs the Dependency Graph (default-on for public
+# repos). PR-triggered only — the action compares base vs head.
+name: Dependency Review
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-dependency-review.yml@v1
+    # with:
+    #   fail-on-severity: moderate

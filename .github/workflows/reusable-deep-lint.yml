@@ -1,6 +1,6 @@
-# Reusable: super-linter deep scan (slim image). Deliberately NOT per-PR —
-# the image pull costs minutes on private repos; run it on a weekly schedule
-# plus workflow_dispatch (see templates/deep-lint.yml).
+# Reusable: super-linter deep scan (slim image). Deliberately NOT per-PR — the
+# image pull is heavy (minutes per run); run it on a weekly schedule plus
+# workflow_dispatch (see templates/deep-lint.yml).
 name: Reusable Deep Lint
 
 on:
@@ -9,6 +9,22 @@ on:
       runs-on:
         type: string
         default: ubuntu-latest
+      default-branch:
+        description: Repo default branch (super-linter diffs against it).
+        type: string
+        default: main
+      linter-rules-path:
+        description: Directory holding the linter config files (default = repo root).
+        type: string
+        default: "."
+      python-ruff-config:
+        description: ruff config filename, relative to linter-rules-path.
+        type: string
+        default: ruff.toml
+      yaml-config:
+        description: yamllint config filename, relative to linter-rules-path.
+        type: string
+        default: .yamllint.yml
 
 permissions:
   contents: read
@@ -33,9 +49,11 @@ jobs:
           VALIDATE_GITHUB_ACTIONS: true
           VALIDATE_BASH: true
           VALIDATE_MARKDOWN: true
-          # Configs live at the repo root, not .github/linters/
-          LINTER_RULES_PATH: .
-          PYTHON_RUFF_CONFIG_FILE: ruff.toml
-          YAML_CONFIG_FILE: .yamllint.yml
-          DEFAULT_BRANCH: main
+          # Config locations are inputs (default = repo root, not .github/linters/)
+          # so a repo that keeps configs elsewhere or uses a non-main default
+          # branch can adopt this without editing the reusable.
+          LINTER_RULES_PATH: ${{ inputs.linter-rules-path }}
+          PYTHON_RUFF_CONFIG_FILE: ${{ inputs.python-ruff-config }}
+          YAML_CONFIG_FILE: ${{ inputs.yaml-config }}
+          DEFAULT_BRANCH: ${{ inputs.default-branch }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

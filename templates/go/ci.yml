@@ -1,0 +1,24 @@
+# Copy to .github/workflows/ci.yml in a Go repo (build + vet + test).
+# Generic — no org coupling. Also copy templates/zizmor.yml -> .github/zizmor.yml.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-go-ci.yml@v1
+    # with:
+    #   go-versions: '["1.23","stable"]'   # widen the matrix
+    #   run-lint: true                      # needs a .golangci.yml in the repo
+    #   run-race: false                     # if the suite is not race-safe yet

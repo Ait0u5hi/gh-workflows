@@ -3,20 +3,18 @@
 # shared linter vendored in gh-workflows. Platform-gated matches are suppressed
 # in-source with `# windows-footgun: ok`.
 #
-# The linter is pulled via the windows-footguns *composite action* rather than a
-# second `actions/checkout` of this private repo. A cross-repo `checkout` uses the
-# caller's default GITHUB_TOKEN, which cannot read this private repo (git exit
-# 128); a same-owner composite action resolves with the same private-access grant
-# that already loads this reusable workflow — no token, no visibility change.
+# The linter is pulled via the windows-footguns *composite action* (rather than
+# a second checkout of this repo) so it resolves with the same grant that already
+# loaded this reusable workflow — one fetch, no extra token.
+#
+# This is an opt-in Ait0u5hi governance workflow: the composite-action ref below
+# is hardcoded to this repo. An external fork must repoint the `uses:` at its own
+# org, or the check runs against Ait0u5hi's linter rather than the fork's.
 name: Cross-platform lint (reusable)
 
 on:
   workflow_call:
     inputs:
-      gh-workflows-ref:
-        description: Retained for back-compat; the composite action is pinned to the same tag as this reusable workflow.
-        type: string
-        default: main
       base-ref:
         description: Base branch to diff changed files against.
         type: string
@@ -38,8 +36,8 @@ jobs:
       - name: Scan changed Python for Windows footguns
         # Same-repo composite action, versioned by the same tag as this reusable
         # workflow (they move together on release), so a commit-hash pin would be
-        # self-referential and churn on every change. It resolves via the same
-        # same-owner private-access grant that already loads this reusable.
+        # self-referential and churn on every change. External forks: repoint the
+        # org in this `uses:` (see the header note).
         uses: Ait0u5hi/gh-workflows/actions/windows-footguns@v1  # zizmor: ignore[unpinned-uses]
         with:
           base-ref: ${{ inputs.base-ref }}

@@ -1,0 +1,18 @@
+# Copy to .github/workflows/spellcheck.yml. codespell over the repo. Add a
+# .codespellrc or [tool.codespell] block to tune ignores/skips.
+name: Spellcheck
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  spellcheck:
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-spellcheck.yml@v1
+    # with:
+    #   codespell-args: "--skip=*.lock,*.svg -L crate,ba"

@@ -1,0 +1,17 @@
+# Copy to .github/workflows/link-check.yml. Weekly + manual only — external
+# links flap, so keep link checking off the per-PR blocking path.
+name: Link Check
+
+on:
+  schedule:
+    - cron: "41 6 * * 1"  # Mondays 06:41 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  link-check:
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-link-check.yml@v1
+    # with:
+    #   args: "--no-progress --exclude-mail './docs/**/*.md' README.md"
