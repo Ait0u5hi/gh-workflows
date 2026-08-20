@@ -57,6 +57,7 @@ governance — adopt them in any repo, yours or otherwise.
 | `reusable-python-eval.yml` | pytest with test-existence guard, single version. Kept for existing callers — new repos should prefer `reusable-python-ci.yml` (adds ruff + a matrix) | `python-version` (3.10), `extra-deps` (pyyaml) |
 | `reusable-codeql.yml` | CodeQL code scanning (SAST), matrix by language; SARIF to the Security tab. **Public repos only** — auto-skips on private personal repos (no GitHub Advanced Security). Caller grants `security-events: write` | `languages` (`["python"]`), `build-mode` (none) |
 | `reusable-security.yml` | gitleaks secret scan over full history — caller must grant `pull-requests: read` | — |
+| `reusable-content-scan.yml` | ripgrep sweep for **caller-supplied** patterns (private hostnames, internal jargon, journal-voice phrases). Ships no wordlist — the pattern file lives in the caller repo, so gh-workflows stays free of consumer-private tokens. Complements gitleaks: catches leaks that are not secrets | `patterns-file` (`.github/content-scan-patterns.txt`), `paths` (`.`) |
 | `reusable-osv.yml` | OSV-Scanner dependency-CVE scan; SARIF to the Security tab — caller must grant `security-events: write`. Language-agnostic (auto-detects manifests) | `scan-args` (`--recursive .`), `fail-on-vuln` (false) |
 | `reusable-deep-lint.yml` | super-linter slim, full codebase, whitelist: ruff/yaml/actions/bash/markdown. Weekly + dispatch only — never per-PR (image pull burns metered private-repo minutes) | — |
 | `reusable-release.yml` | git-cliff release notes + CHANGELOG regen + GitHub Release; needs caller `cliff.toml`, `contents: write` | `plugin-manifest` (false — sync plugin.yaml version) |
@@ -112,6 +113,7 @@ Reference intra-org, ref-pinned (`@v1`), same as the reusables:
 - `templates/python-plugin/` — validation, eval, security, release (Hermes plugin repos)
 - `templates/deep-lint.yml` — weekly super-linter sweep
 - `templates/osv.yml` — dependency-CVE scan (copy to `.github/workflows/`)
+- `templates/content-scan.yml` — ripgrep sweep for caller-supplied forbidden patterns; complements gitleaks. Also create `.github/content-scan-patterns.txt` in the caller repo
 - `templates/dependabot.yml` — copy to `.github/dependabot.yml`; keeps SHA-pinned
   actions current (github-actions ecosystem only — source-dep pins stay manual)
 - `templates/zizmor.yml` — copy to `.github/zizmor.yml` alongside any stub

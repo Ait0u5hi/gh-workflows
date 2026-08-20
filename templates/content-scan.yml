@@ -1,0 +1,36 @@
+# Copy to .github/workflows/content-scan.yml, then create your patterns file
+# at .github/content-scan-patterns.txt (one ripgrep regex per line, `#` for
+# comments). The patterns file lives in YOUR repo — this template does not
+# ship a wordlist, so gh-workflows never sees consumer-private tokens.
+#
+# Suggested starting patterns for a repo you are making public:
+#
+#   # journal-voice phrases
+#   \bfor tonight\b
+#   \bnext[- ]session\b
+#   \bstopping point\b
+#   # RFC1918 LAN addresses
+#   \b10\.10\.0\.
+#   \b192\.168\.
+#   # your private hostnames, project codenames, etc. — add as they arise
+#
+# Iterate: whenever a review sweep finds new leaked content, add the pattern
+# here so it cannot recur.
+name: Content Scan
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: content-scan-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  content-scan:
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-content-scan.yml@v1
