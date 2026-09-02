@@ -55,8 +55,12 @@ jobs:
 
           with open("plugin.yaml") as f:
               manifest = yaml.safe_load(f)
-          for key in ("name", "version", "hooks"):
+          for key in ("name", "version"):
               assert key in manifest, f"plugin.yaml missing required key: {key}"
+          # Hermes reads `provides_hooks` (what `hermes plugins doctor` validates);
+          # `hooks` is the older v1 spelling. Either satisfies the gate.
+          assert "provides_hooks" in manifest or "hooks" in manifest, \
+              "plugin.yaml missing required key: provides_hooks (or legacy hooks)"
           print(f"plugin.yaml OK: {manifest['name']} v{manifest['version']}")
           EOF
       - name: Syntax-check all Python sources
