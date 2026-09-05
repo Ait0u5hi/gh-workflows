@@ -14,3 +14,14 @@ jobs:
 
   crossplatform-lint:
     uses: ./.github/workflows/reusable-crossplatform-lint.yml
+
+  repo-docs:
+    uses: ./.github/workflows/reusable-repo-docs.yml
+
+  pr-title:
+    uses: ./.github/workflows/reusable-pr-title.yml
+
+  doc-commands:
+    uses: ./.github/workflows/reusable-doc-commands.yml
+    with:
+      paths: 'CONTRIBUTING.md docs/CONTRIBUTION-STANDARD.md templates/CONTRIBUTING.md'

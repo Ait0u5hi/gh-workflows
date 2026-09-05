@@ -1,0 +1,47 @@
+# Reusable: validate the shell commands our docs tell people to run.
+#
+# A doc that exists to be followed should have its instructions checked. Upstream precedent:
+# hermes-agent's CONTRIBUTING shipped `gh search prs --state all` - invalid, gh accepts only
+# {open|closed} - in its most-followed section, apparently for months.
+#
+# Static validation only: commands are parsed and their flag VALUES checked against each tool's
+# accepted set. Nothing is executed, so this is side-effect free and needs no credentials.
+name: Reusable Doc Commands Check
+
+on:
+  workflow_call:
+    inputs:
+      paths:
+        description: Space-separated markdown files to check.
+        type: string
+        default: 'CONTRIBUTING.md'
+
+permissions:
+  contents: read
+
+jobs:
+  doc-commands:
+    name: documented commands are runnable
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the calling repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Fetch the checker from gh-workflows
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: Ait0u5hi/gh-workflows
+          ref: v1
+          path: .gh-workflows-tools
+          sparse-checkout: scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Validate documented commands
+        env:
+          DOC_PATHS: ${{ inputs.paths }}
+        run: |
+          set -uo pipefail
+          # Word-splitting is intentional: the input is a space-separated path list.
+          # shellcheck disable=SC2086
+          python3 .gh-workflows-tools/scripts/check-doc-commands.py $DOC_PATHS

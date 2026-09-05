@@ -1,7 +1,13 @@
 # Copy to <your-repo>/.github/workflows/pr-governance.yml.
-# Contribution governance (attribution + cross-platform footguns) via the
-# gh-workflows reusables. The stub owns triggers/permissions; logic lives in
-# gh-workflows. Pin @main to always-current, or @v1 once you want stability.
+#
+# Contribution governance via the gh-workflows reusables. The stub owns triggers/permissions;
+# logic lives in gh-workflows. Pin @main to always-current, or @v1 once you want stability.
+#
+# NOTE: this is a COPY, not a reference. Editing the template in gh-workflows does NOT reach
+# repos that already copied it - each consumer has its own file and must be updated separately.
+#
+# Adopting incrementally? `repo-docs` takes a `skip` input so you can land the docs one at a
+# time instead of blocking every PR until they all exist.
 name: PR Governance
 
 on:
@@ -17,3 +23,17 @@ jobs:
 
   crossplatform-lint:
     uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-crossplatform-lint.yml@v1
+
+  repo-docs:
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-repo-docs.yml@v1
+    # with:
+    #   skip: SECURITY.md          # while adopting
+    #   require-standard-link: true
+
+  pr-title:
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-pr-title.yml@v1
+
+  doc-commands:
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-doc-commands.yml@v1
+    with:
+      paths: 'CONTRIBUTING.md'
