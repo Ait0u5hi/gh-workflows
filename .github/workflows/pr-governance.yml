@@ -14,3 +14,19 @@ jobs:
 
   crossplatform-lint:
     uses: ./.github/workflows/reusable-crossplatform-lint.yml
+
+  repo-docs:
+    uses: ./.github/workflows/reusable-repo-docs.yml
+    with:
+      # Check against THIS PR's scripts, not the released v1 - otherwise a PR that
+      # breaks the checker would still pass, and a new checker could never bootstrap.
+      tools-ref: ${{ github.event.pull_request.head.sha }}
+
+  pr-title:
+    uses: ./.github/workflows/reusable-pr-title.yml
+
+  doc-commands:
+    uses: ./.github/workflows/reusable-doc-commands.yml
+    with:
+      tools-ref: ${{ github.event.pull_request.head.sha }}
+      paths: 'CONTRIBUTING.md docs/CONTRIBUTION-STANDARD.md templates/CONTRIBUTING.md'

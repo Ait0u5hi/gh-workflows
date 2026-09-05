@@ -1,0 +1,64 @@
+# Reusable: fail a PR when the repo is missing its required contribution docs.
+#
+# PRESENCE ONLY. Presence is decidable, so refusing on it is sound. Content quality is heuristic,
+# and a heuristic gate that refuses trains people to route around it - those stay advisory in the
+# script's output. See docs/CONTRIBUTION-STANDARD.md section 8.
+name: Reusable Repo Docs Check
+
+on:
+  workflow_call:
+    inputs:
+      tools-ref:
+        description: >-
+          gh-workflows ref to fetch the checker script from. Defaults to v1. Pass 'main' while
+          bootstrapping a checker that has not been released to v1 yet, or a SHA when gh-workflows
+          checks ITSELF - otherwise it would validate the released script rather than the one in
+          the PR, and a PR that broke the checker would still pass.
+        type: string
+        default: v1
+      skip:
+        description: Comma-separated required files to waive (e.g. "SECURITY.md") while a repo adopts incrementally.
+        type: string
+        default: ''
+      require-standard-link:
+        description: Require CONTRIBUTING.md to link the shared contribution standard.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  repo-docs:
+    name: required contribution docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the calling repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # Nothing here needs the token after checkout; leaving it in .git/config
+          # is how credentials end up inside uploaded artifacts (zizmor: artipacked).
+          persist-credentials: false
+
+      - name: Fetch the checker from gh-workflows
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          repository: Ait0u5hi/gh-workflows
+          ref: ${{ inputs.tools-ref }}
+          path: .gh-workflows-tools
+          sparse-checkout: scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Check required docs
+        env:
+          SKIP: ${{ inputs.skip }}
+          REQUIRE_LINK: ${{ inputs.require-standard-link }}
+        run: |
+          set -uo pipefail
+          args=(--skip "$SKIP")
+          if [ "$REQUIRE_LINK" != "true" ]; then
+            args+=(--no-require-link)
+          fi
+          python3 .gh-workflows-tools/scripts/check-repo-docs.py . "${args[@]}"

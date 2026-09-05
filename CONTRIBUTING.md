@@ -4,6 +4,10 @@ Central reusable GitHub Actions workflows for Ait0u5hi repos. Logic lives here
 once; each repo calls it via a thin caller-stub. Changes here ripple to every
 consumer, so the bar is: **small, tested, and backward-compatible for callers.**
 
+This repo also defines and dogfoods the shared
+[Ait0u5hi contribution standard](https://github.com/Ait0u5hi/gh-workflows/blob/main/docs/CONTRIBUTION-STANDARD.md)
+— read that first; the rules below are what is specific to *this* repo.
+
 ## Before you start: search first
 
 Check [existing PRs](https://github.com/Ait0u5hi/gh-workflows/pulls) and issues —
@@ -24,7 +28,7 @@ duplicates are common and a minute up front keeps the queue clean.
 
 ## Governance this repo provides (and dogfoods)
 
-Two reusable checks, wired into new repos via `templates/pr-governance.yml`:
+Four reusable checks, wired into new repos via `templates/pr-governance.yml`:
 
 - **Contributor Attribution Check** (`.github/workflows/reusable-contributor-check.yml`)
   — fails a PR whose commit author emails aren't mapped under
@@ -38,12 +42,33 @@ Two reusable checks, wired into new repos via `templates/pr-governance.yml`:
   `os.fork`, hardcoded `/tmp`, …) with `scripts/check-windows-footguns.py`.
   Fix cross-platform first; suppress a genuinely platform-gated line with
   `# windows-footgun: ok`.
+- **Required contribution docs** (`.github/workflows/reusable-repo-docs.yml`) — fails a PR when
+  `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `LICENSE` or the PR template is missing,
+  or when `CONTRIBUTING.md` does not link the shared standard. Presence only, by design: presence
+  is decidable, so refusing on it is sound; content quality is heuristic and stays advisory.
+  Run it locally with `python3 scripts/check-repo-docs.py <repo>`; unit tests in `scripts/tests/`.
+- **Conventional-Commit PR title** (`.github/workflows/reusable-pr-title.yml`) — see the soundness
+  note in that file: it only guarantees the landed subject if the repo squash-merges.
 
 ## Adopt the governance in another repo
 
 1. Copy `templates/pr-governance.yml` → `<repo>/.github/workflows/pr-governance.yml`.
+   Note this is a **copy, not a reference** — editing the template later does not reach repos that
+   already copied it.
 2. Copy `scripts/add_contributor.py` and add your `contributors/emails/` mapping.
-3. Add a `CONTRIBUTING.md` + `.github/PULL_REQUEST_TEMPLATE.md` (crib from here).
+3. Copy the doc templates and fill their `{{PLACEHOLDERS}}`:
+   `templates/CONTRIBUTING.md`, `templates/CODE_OF_CONDUCT.md`, `templates/SECURITY.md`,
+   `templates/PULL_REQUEST_TEMPLATE.md` and `templates/ISSUE_TEMPLATE/`.
+4. Check it locally before pushing — the `repo-docs` job runs exactly this:
+   ```bash
+   python3 scripts/check-repo-docs.py /path/to/repo
+   ```
+   Adopting gradually? `repo-docs` takes a `skip` input so you can land the docs one at a time.
+5. Make the PR-title check mean something by disabling non-squash merges, so the title you lint is
+   the subject that actually lands:
+   ```bash
+   gh api -X PATCH repos/Ait0u5hi/<repo> -F allow_merge_commit=false -F allow_rebase_merge=false
+   ```
 
 ## PR checklist
 

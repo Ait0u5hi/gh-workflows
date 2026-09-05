@@ -1,6 +1,12 @@
 # Reusable: enforce a Conventional-Commits PR title. This repo's CONTRIBUTING
-# requires conventional commits but nothing enforced PR titles (which become the
-# squash-merge commit subject). Pure inline bash — no third-party marketplace
+# requires conventional commits but nothing enforced PR titles.
+#
+# SOUNDNESS NOTE (corrected 2026-09-05): the PR title is the landed commit subject ONLY when the
+# repo squash-merges. This comment previously asserted that unconditionally; measured, every repo
+# in this fleet had allow_merge_commit and allow_rebase_merge enabled alongside squash, so a merge
+# or rebase would land the branch's own commit messages and this check would guarantee nothing.
+# For this gate to mean what it says, disable merge-commit and rebase on the repo:
+#   gh api -X PATCH repos/OWNER/REPO -F allow_merge_commit=false -F allow_rebase_merge=false Pure inline bash — no third-party marketplace
 # action — so there is zero supply-chain surface for a check that reads an
 # attacker-influenceable value (the PR title). Callers: see templates/pr-title.yml.
 name: Reusable PR Title Lint
