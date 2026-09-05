@@ -26,10 +26,7 @@ jobs:
 
   repo-docs:
     uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-repo-docs.yml@v1
-    with:
-      # Until the checkers are released to the v1 tag, fetch them from main.
-      # Drop this line once v1 has been retagged.
-      tools-ref: main
+    # with:
     #   skip: SECURITY.md          # while adopting incrementally
     #   require-standard-link: true
 
@@ -39,5 +36,4 @@ jobs:
   doc-commands:
     uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-doc-commands.yml@v1
     with:
-      tools-ref: main   # drop once v1 has been retagged
       paths: 'CONTRIBUTING.md'
