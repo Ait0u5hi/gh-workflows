@@ -11,6 +11,14 @@ name: Reusable Doc Commands Check
 on:
   workflow_call:
     inputs:
+      tools-ref:
+        description: >-
+          gh-workflows ref to fetch the checker script from. Defaults to v1. Pass 'main' while
+          bootstrapping a checker that has not been released to v1 yet, or a SHA when gh-workflows
+          checks ITSELF - otherwise it would validate the released script rather than the one in
+          the PR, and a PR that broke the checker would still pass.
+        type: string
+        default: v1
       paths:
         description: Space-separated markdown files to check.
         type: string
@@ -32,7 +40,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: Ait0u5hi/gh-workflows
-          ref: v1
+          ref: ${{ inputs.tools-ref }}
           path: .gh-workflows-tools
           sparse-checkout: scripts
           sparse-checkout-cone-mode: false
