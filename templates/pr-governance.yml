@@ -12,6 +12,12 @@ name: PR Governance
 
 on:
   pull_request:
+    # `edited` matters: without it a PR-title fix does NOT re-run pr-title, so the stale
+    # failure stands and the only way past it is to merge red. Measured 2026-09-06 on
+    # ml-development-and-engineering #182 -- the title was corrected 15 SECONDS after the
+    # check failed, the job never re-ran, and the PR merged with a red pr-title. A gate that
+    # keeps refusing after the author has fixed the problem trains people to merge past it.
+    types: [opened, synchronize, reopened, edited]
     branches: [main]
 
 permissions:
