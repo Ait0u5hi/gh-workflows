@@ -15,13 +15,17 @@ on:
         description: Base branch to diff commits against.
         type: string
         default: main
+      runs-on:
+        description: Runner label (set to a self-hosted label to move off GitHub-hosted)
+        type: string
+        default: ubuntu-latest
 
 permissions:
   contents: read
 
 jobs:
   check-attribution:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1

@@ -18,6 +18,10 @@ on:
         description: Pipe-separated allowed Conventional-Commit types.
         type: string
         default: feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert
+      runs-on:
+        description: Runner label (set to a self-hosted label to move off GitHub-hosted)
+        type: string
+        default: ubuntu-latest
 
 permissions:
   contents: read
@@ -25,7 +29,7 @@ permissions:
 jobs:
   lint-title:
     name: conventional PR title
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     timeout-minutes: 5
     steps:
       - name: Check PR title
