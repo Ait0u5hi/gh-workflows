@@ -23,6 +23,10 @@ on:
         description: Space-separated markdown files to check.
         type: string
         default: 'CONTRIBUTING.md'
+      runs-on:
+        description: Runner label (set to a self-hosted label to move off GitHub-hosted)
+        type: string
+        default: ubuntu-latest
 
 permissions:
   contents: read
@@ -30,7 +34,7 @@ permissions:
 jobs:
   doc-commands:
     name: documented commands are runnable
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     timeout-minutes: 5
     steps:
       - name: Check out the calling repo
