@@ -13,6 +13,14 @@
 # one reusable serves the Python and Node consumer repos. Override `scan-args`
 # to target specific lockfiles instead of the recursive default.
 #
+# Two scanner modes:
+#   action (default) — google/osv-scanner-action, a DOCKER action: needs a host
+#                      with docker (GitHub-hosted runners have it).
+#   local            — the `osv-scanner` binary already on the runner's PATH.
+#                      For self-hosted runners without docker: install a pinned,
+#                      checksum-verified release binary once, and the job pulls
+#                      no container image or marketplace action to scan.
+#
 # Caller stub must grant: contents: read, security-events: write, actions: read.
 # See templates/osv.yml.
 name: Reusable OSV Scan
@@ -23,6 +31,13 @@ on:
       runs-on:
         type: string
         default: ubuntu-latest
+      scanner:
+        description: >-
+          "action" (docker-based google/osv-scanner-action, default) or "local"
+          (the osv-scanner binary on the runner PATH; for self-hosted runners
+          without docker).
+        type: string
+        default: action
       scan-args:
         description: >-
           Arguments passed to the scanner. Default scans the checkout
@@ -54,11 +69,21 @@ jobs:
       contents: read
       security-events: write
     steps:
+      - name: Validate scanner input
+        env:
+          SCANNER: ${{ inputs.scanner }}
+        run: |
+          case "$SCANNER" in
+            action|local) echo "scanner: $SCANNER" ;;
+            *) echo "::error::scanner must be 'action' or 'local', got '$SCANNER'"; exit 1 ;;
+          esac
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Run scanner
+        if: ${{ inputs.scanner == 'action' }}
         uses: google/osv-scanner-action/osv-scanner-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
         with:
           scan-args: |-
@@ -68,6 +93,7 @@ jobs:
         continue-on-error: true
 
       - name: Generate SARIF report
+        if: ${{ inputs.scanner == 'action' }}
         uses: google/osv-scanner-action/osv-reporter-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
         with:
           scan-args: |-
@@ -75,6 +101,33 @@ jobs:
             --new=results.json
             --gh-annotations=false
             --fail-on-vuln=${{ inputs.fail-on-vuln }}
+
+      - name: Run scanner (local binary)
+        if: ${{ inputs.scanner == 'local' }}
+        env:
+          SCAN_ARGS: ${{ inputs.scan-args }}
+          FAIL_ON_VULN: ${{ inputs.fail-on-vuln }}
+        run: |
+          set -uo pipefail
+          command -v osv-scanner >/dev/null || {
+            echo "::error::scanner=local but osv-scanner is not on PATH; install the pinned release binary on this runner"
+            exit 1
+          }
+          osv-scanner --version | head -1
+          # Exit codes (osv-scanner docs): 0 no vulns, 1 vulns found,
+          # 127 general error, 128 no packages found.
+          # Word-splitting is intentional: scan-args is a flag list.
+          # shellcheck disable=SC2086
+          osv-scanner scan source --format=sarif --output-file=results.sarif $SCAN_ARGS
+          rc=$?
+          case "$rc" in
+            0) echo "No known vulnerabilities." ;;
+            1) echo "::warning::OSV-Scanner found vulnerabilities (see results.sarif)."
+               if [ "$FAIL_ON_VULN" = "true" ]; then exit 1; fi ;;
+            128) echo "No supported manifests or lockfiles found; writing an empty SARIF."
+                 printf '%s\n' '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"osv-scanner","rules":[]}},"results":[]}]}' > results.sarif ;;
+            *) echo "::error::osv-scanner failed with exit code $rc"; exit "$rc" ;;
+          esac
 
       - name: Upload SARIF artifact
         id: upload_artifact

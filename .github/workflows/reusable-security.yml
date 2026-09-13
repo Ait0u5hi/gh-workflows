@@ -1,6 +1,14 @@
 # Reusable: gitleaks secret scan over full history.
 # Caller stub must grant: permissions: contents: read, pull-requests: read
 # Callers: see templates/python-plugin/security.yml
+#
+# Two scanner modes:
+#   action (default) — gitleaks/gitleaks-action. Needs a GITLEAKS_LICENSE secret
+#                      when the repo belongs to an organization.
+#   local            — the `gitleaks` binary already on the runner's PATH, run over
+#                      the full history. For self-hosted runners: install a pinned,
+#                      checksum-verified release once; no marketplace action and no
+#                      license key needed.
 name: Reusable Security
 
 on:
@@ -9,6 +17,12 @@ on:
       runs-on:
         type: string
         default: ubuntu-latest
+      scanner:
+        description: >-
+          "action" (gitleaks/gitleaks-action, default) or "local" (the gitleaks
+          binary on the runner PATH).
+        type: string
+        default: action
 
 permissions:
   contents: read
@@ -22,10 +36,33 @@ jobs:
       contents: read
       pull-requests: read
     steps:
+      - name: Validate scanner input
+        env:
+          SCANNER: ${{ inputs.scanner }}
+        run: |
+          case "$SCANNER" in
+            action|local) echo "scanner: $SCANNER" ;;
+            *) echo "::error::scanner must be 'action' or 'local', got '$SCANNER'"; exit 1 ;;
+          esac
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+
+      - if: ${{ inputs.scanner == 'action' }}
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: gitleaks (local binary, full history)
+        if: ${{ inputs.scanner == 'local' }}
+        run: |
+          set -uo pipefail
+          command -v gitleaks >/dev/null || {
+            echo "::error::scanner=local but gitleaks is not on PATH; install the pinned release binary on this runner"
+            exit 1
+          }
+          echo "gitleaks $(gitleaks version)"
+          # --redact keeps any found secret out of the job log; exit 1 = leaks found.
+          gitleaks git --redact --no-banner --verbose --exit-code 1 .
