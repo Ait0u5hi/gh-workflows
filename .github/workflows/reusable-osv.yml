@@ -13,13 +13,16 @@
 # one reusable serves the Python and Node consumer repos. Override `scan-args`
 # to target specific lockfiles instead of the recursive default.
 #
-# Two scanner modes:
-#   action (default) — google/osv-scanner-action, a DOCKER action: needs a host
-#                      with docker (GitHub-hosted runners have it).
-#   local            — the `osv-scanner` binary already on the runner's PATH.
-#                      For self-hosted runners without docker: install a pinned,
-#                      checksum-verified release binary once, and the job pulls
-#                      no container image or marketplace action to scan.
+# Two scanner modes, as two JOBS (not two step branches):
+#   action (default) — job `scan`: google/osv-scanner-action, a DOCKER action.
+#                      Needs a host with docker (GitHub-hosted runners have it).
+#   local            — job `scan-local`: the `osv-scanner` binary already on the
+#                      runner's PATH. For self-hosted runners without docker.
+# Why jobs: the runner pulls every docker action image in a job during job setup,
+# BEFORE step `if:` conditions are evaluated. A step-level switch therefore still
+# fails with "docker: command not found" on a docker-less runner (measured
+# 2026-09-13, ml-development-and-engineering PR #214). A job skipped by a
+# job-level `if:` never reaches a runner, so nothing is pulled.
 #
 # Caller stub must grant: contents: read, security-events: write, actions: read.
 # See templates/osv.yml.
@@ -60,6 +63,9 @@ permissions:
 jobs:
   scan:
     name: Scan dependencies
+    # Any value other than 'local' lands here, so a typo fails loudly in the
+    # validation step instead of silently skipping both jobs.
+    if: ${{ inputs.scanner != 'local' }}
     runs-on: ${{ inputs.runs-on }}
     timeout-minutes: 15
     permissions:
@@ -74,7 +80,7 @@ jobs:
           SCANNER: ${{ inputs.scanner }}
         run: |
           case "$SCANNER" in
-            action|local) echo "scanner: $SCANNER" ;;
+            action) echo "scanner: $SCANNER" ;;
             *) echo "::error::scanner must be 'action' or 'local', got '$SCANNER'"; exit 1 ;;
           esac
 
@@ -83,7 +89,6 @@ jobs:
           persist-credentials: false
 
       - name: Run scanner
-        if: ${{ inputs.scanner == 'action' }}
         uses: google/osv-scanner-action/osv-scanner-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
         with:
           scan-args: |-
@@ -93,7 +98,6 @@ jobs:
         continue-on-error: true
 
       - name: Generate SARIF report
-        if: ${{ inputs.scanner == 'action' }}
         uses: google/osv-scanner-action/osv-reporter-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
         with:
           scan-args: |-
@@ -102,8 +106,59 @@ jobs:
             --gh-annotations=false
             --fail-on-vuln=${{ inputs.fail-on-vuln }}
 
+      - name: Upload SARIF artifact
+        id: upload_artifact
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: osv-scanner-sarif
+          path: results.sarif
+          retention-days: 5
+
+      - name: Upload to code scanning
+        # Non-fatal: SARIF upload to the code-scanning dashboard requires GitHub
+        # Advanced Security, which is free on public repos but not enabled on
+        # private personal-account repos. Where it isn't available this warns
+        # instead of failing; findings still ship as the SARIF artifact above,
+        # and `fail-on-vuln` gates the job independently of the dashboard.
+        continue-on-error: true
+        if: ${{ !cancelled() }}
+        uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
+        with:
+          sarif_file: results.sarif
+
+      - name: Print code-scanning URL
+        if: ${{ !cancelled() }}
+        env:
+          SERVER_URL: ${{ github.server_url }}
+          REPOSITORY: ${{ github.repository }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          echo "OSV-Scanner results (Security tab):"
+          echo "${SERVER_URL}/${REPOSITORY}/security/code-scanning?query=is%3Aopen+branch%3A${REF_NAME}+tool%3Aosv-scanner"
+
+      - name: Fail if artifact upload failed
+        if: ${{ always() && steps.upload_artifact.outcome == 'failure' }}
+        run: |
+          echo "::error::SARIF upload failed — most likely a scanner error earlier in the job."
+          exit 1
+
+  scan-local:
+    name: Scan dependencies
+    # No docker actions in this job: safe on a docker-less self-hosted runner.
+    if: ${{ inputs.scanner == 'local' }}
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Run scanner (local binary)
-        if: ${{ inputs.scanner == 'local' }}
         env:
           SCAN_ARGS: ${{ inputs.scan-args }}
           FAIL_ON_VULN: ${{ inputs.fail-on-vuln }}
@@ -139,26 +194,13 @@ jobs:
           retention-days: 5
 
       - name: Upload to code scanning
-        # Non-fatal: SARIF upload to the code-scanning dashboard requires GitHub
-        # Advanced Security, which is free on public repos but not enabled on
-        # private personal-account repos. Where it isn't available this warns
-        # instead of failing; findings still ship as the SARIF artifact above,
-        # and `fail-on-vuln` gates the job independently of the dashboard.
+        # Non-fatal for the same reason as in `scan` (no GitHub Advanced Security
+        # on private personal-account repos).
         continue-on-error: true
         if: ${{ !cancelled() }}
         uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
         with:
           sarif_file: results.sarif
-
-      - name: Print code-scanning URL
-        if: ${{ !cancelled() }}
-        env:
-          SERVER_URL: ${{ github.server_url }}
-          REPOSITORY: ${{ github.repository }}
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          echo "OSV-Scanner results (Security tab):"
-          echo "${SERVER_URL}/${REPOSITORY}/security/code-scanning?query=is%3Aopen+branch%3A${REF_NAME}+tool%3Aosv-scanner"
 
       - name: Fail if artifact upload failed
         if: ${{ always() && steps.upload_artifact.outcome == 'failure' }}
