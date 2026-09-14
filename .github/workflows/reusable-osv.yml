@@ -168,13 +168,16 @@ jobs:
             echo "::error::scanner=local but osv-scanner is not on PATH; install the pinned release binary on this runner"
             exit 1
           }
-          osv-scanner --version | head -1
+          osv-scanner --version || true
           # Exit codes (osv-scanner docs): 0 no vulns, 1 vulns found,
           # 127 general error, 128 no packages found.
+          # Actions runs `run:` under `bash -e`: a bare nonzero exit would abort the
+          # step before the case below (measured 2026-09-13: rc 128 on a repo with no
+          # manifests killed the step). Capture rc with `|| rc=$?` so -e does not fire.
+          rc=0
           # Word-splitting is intentional: scan-args is a flag list.
           # shellcheck disable=SC2086
-          osv-scanner scan source --format=sarif --output-file=results.sarif $SCAN_ARGS
-          rc=$?
+          osv-scanner scan source --format=sarif --output-file=results.sarif $SCAN_ARGS || rc=$?
           case "$rc" in
             0) echo "No known vulnerabilities." ;;
             1) echo "::warning::OSV-Scanner found vulnerabilities (see results.sarif)."
