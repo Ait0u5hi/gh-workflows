@@ -29,7 +29,7 @@ jobs:
     steps:
       # Credentials deliberately persisted: this job pushes the changelog
       # commit back to main.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # zizmor: ignore[artipacked] # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # zizmor: ignore[artipacked] # v7.0.1
         with:
           ref: ${{ inputs.default-branch }}
           fetch-depth: 0
