@@ -26,8 +26,14 @@ updates:
       - "dependencies"
       - "github-actions"
     commit-message:
+      # No `include: "scope"`. Dependabot APPENDS its own `(deps)` scope when
+      # that is set, so prefix+include produced `chore(actions)(deps): ...` — a
+      # double scope, which our own reusable-pr-title gate refuses (it allows
+      # exactly one parenthesised scope). Every weekly PR failed that gate
+      # until 2026-09-21; see scripts/tests/test_pr_title_pattern.py. The
+      # scope stays `actions` rather than dependabot's `deps` because this
+      # config is actions-only, so `actions` is the more informative of the two.
       prefix: "chore(actions)"
-      include: "scope"
     groups:
       actions-minor-patch:
         update-types:
