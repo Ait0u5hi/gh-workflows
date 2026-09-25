@@ -7,6 +7,10 @@ tags callers pin (`@v1`). See [README → Versioning](README.md#versioning).
 ## [Unreleased]
 
 ### Added
+- `labels.yml` + `scripts/sync_labels.py`: the shared issue-label taxonomy
+  (`type:bug|friction|gap|debt|flaky`, `source:agent|human`, `status:carded`) and an
+  idempotent, dry-run-by-default script that applies it to the repos you name. It never
+  deletes or renames a label.
 - `examples/` — placeholder-org (`<your-org>`) copy-paste caller stubs for
   external adopters, plus an external-adopter contract in the README.
 - `reusable-deep-lint.yml` inputs: `default-branch`, `linter-rules-path`,

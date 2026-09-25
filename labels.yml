@@ -1,0 +1,36 @@
+# Shared issue-label taxonomy. Applied to a repo by scripts/sync_labels.py.
+#
+# Why labels: the owning account is a GitHub User, and native Issue Types are
+# org-only, so labels are the one taxonomy mechanism available.
+#
+# An issue records that something was NOTICED; a fleet card is the accepted
+# work order. Not issues: status updates or FYIs, research findings, anything
+# carrying secrets or transcript text, recurring reports.
+#
+# sync_labels.py creates and updates these; it never deletes or renames a
+# label, so repo-specific labels (e.g. harness-improvement) survive.
+labels:
+  - name: "type:bug"
+    color: "d73a4a"
+    description: "Wrong output or a crash. Evidence: a command that reproduces it."
+  - name: "type:friction"
+    color: "fbca04"
+    description: "It worked, but cost time or needed a workaround."
+  - name: "type:gap"
+    color: "0e8a16"
+    description: "A capability is missing, or a rule is adopted but not enforced."
+  - name: "type:debt"
+    color: "c5def5"
+    description: "Drift: a stale pin, a dead code path, or a doc that no longer matches."
+  - name: "type:flaky"
+    color: "e99695"
+    description: "A test or CI check that fails nondeterministically."
+  - name: "source:agent"
+    color: "bfdadc"
+    description: "Filed by an agent session."
+  - name: "source:human"
+    color: "d4c5f9"
+    description: "Filed by a person."
+  - name: "status:carded"
+    color: "5319e7"
+    description: "A fleet card exists for this issue; the card id is in a comment."
