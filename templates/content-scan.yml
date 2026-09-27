@@ -3,7 +3,17 @@
 # comments). The patterns file lives in YOUR repo — this template does not
 # ship a wordlist, so gh-workflows never sees consumer-private tokens.
 #
-# Suggested starting patterns for a repo you are making public:
+# For a repo you are making PUBLIC: the committed file above is itself world
+# readable, so it can only safely hold generic/structural patterns —
+# journal-voice phrases, RFC1918 ranges, and the like. Your actually-private
+# names (real hostnames, project codenames, personal names) belong in a
+# CONTENT_SCAN_PATTERNS repo secret instead (same one-regex-per-line format),
+# wired in below. Either source works alone; the reusable merges both when
+# you set the secret. When it is set, findings are reported as path:line only
+# — never the matched text — since Actions logs on a public repo are world
+# readable too.
+#
+# Suggested starting patterns for the COMMITTED file:
 #
 #   # journal-voice phrases
 #   \bfor tonight\b
@@ -12,10 +22,16 @@
 #   # RFC1918 LAN addresses
 #   \b10\.10\.0\.
 #   \b192\.168\.
-#   # your private hostnames, project codenames, etc. — add as they arise
+#
+# Suggested starting patterns for the SECRET (private names only):
+#
+#   your-real-hostname
+#   project-codename-x
+#   your-full-name
 #
 # Iterate: whenever a review sweep finds new leaked content, add the pattern
-# here so it cannot recur.
+# to whichever source fits (generic → file, private → secret) so it cannot
+# recur.
 name: Content Scan
 
 on:
@@ -34,3 +50,8 @@ permissions:
 jobs:
   content-scan:
     uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-content-scan.yml@v1
+    secrets:
+      # Optional — omit this whole `secrets:` block if you only use the
+      # committed patterns file. Create the secret at
+      # Settings → Secrets and variables → Actions → New repository secret.
+      patterns: ${{ secrets.CONTENT_SCAN_PATTERNS }}

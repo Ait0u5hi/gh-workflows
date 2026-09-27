@@ -17,6 +17,15 @@ tags callers pin (`@v1`). See [README → Versioning](README.md#versioning).
   `python-ruff-config`, `yaml-config` (defaults unchanged).
 - `reusable-release.yml` input: `default-branch` (default `main`).
 - `docs/marketplace-research.md`; `branding:` metadata on the composite actions.
+- `reusable-content-scan.yml`: optional `secrets: patterns:` merged with the committed
+  patterns file (either alone now satisfies the "at least one pattern source" check);
+  findings redact to `path:line` (never the matched text) whenever the secret is in
+  play, controllable via the new `redact-matches` input (default `auto`); new `pcre2`
+  input for lookaround patterns. The scan logic and a pinned + SHA-256-verified `rg`
+  install (amd64/arm64, for self-hosted runners without ripgrep) moved to a new
+  `actions/content-scan` composite action, unit-tested in
+  `scripts/tests/test_content_scan.py`. Fully backward compatible — a caller with only
+  a patterns file behaves exactly as before.
 
 ### Fixed
 - `reusable-release.yml` no longer hardcodes `main` for checkout/push-back.

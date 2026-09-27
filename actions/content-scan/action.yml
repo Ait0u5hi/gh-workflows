@@ -1,0 +1,86 @@
+# Composite action backing reusable-content-scan.yml. Installs ripgrep if the
+# runner doesn't already have it (self-hosted runners may not), then runs the
+# scan logic in scripts/content-scan.sh. Using a composite action (rather than
+# a second `actions/checkout` of this repo) lets the reusable workflow reach
+# scripts/content-scan.sh with the same same-owner grant that already resolved
+# it — no extra token, no repo-visibility change. The full gh-workflows repo is
+# fetched alongside the action, so the script is reachable relative to this
+# action's own path.
+name: Content scan
+description: >-
+  Grep the checked-out tree for caller-supplied forbidden patterns (a
+  committed file, a secret, or both), redacting matched text from the log
+  whenever a secret is in play.
+
+inputs:
+  patterns-file:
+    description: Path (in the caller repo) to the ripgrep patterns file. Optional if patterns-secret is set.
+    required: false
+    default: .github/content-scan-patterns.txt
+  patterns-secret:
+    description: >-
+      Newline-separated ripgrep regexes (same format as patterns-file) — pass
+      secrets.patterns from the caller's workflow_call. Never interpolated
+      into the script; only ever reaches it via env.
+    required: false
+    default: ""
+  paths:
+    description: Space-separated paths to scan.
+    required: false
+    default: "."
+  redact-matches:
+    description: auto (on iff patterns-secret is set) | true | false.
+    required: false
+    default: auto
+  pcre2:
+    description: Enable PCRE2 (-P) for lookaround patterns in either pattern source.
+    required: false
+    default: "false"
+
+branding:
+  icon: search
+  color: red
+
+runs:
+  using: composite
+  steps:
+    - name: Install ripgrep (pinned + SHA-256 verified) if missing
+      shell: bash
+      env:
+        # ripgrep 14.1.1. Only these two targets are published upstream:
+        # musl for x86_64, gnu for aarch64 (no aarch64-musl release exists).
+        RG_VERSION: "14.1.1"
+        RG_SHA256_AMD64: 4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e # x86_64-unknown-linux-musl
+        RG_SHA256_ARM64: c827481c4ff4ea10c9dc7a4022c8de5db34a5737cb74484d62eb94a95841ab2f # aarch64-unknown-linux-gnu
+      # The PATH entry appended below is a fixed literal, not attacker-controlled
+      # input, so this doesn't carry the injection risk the rule guards against —
+      # same pattern reusable-link-check.yml already uses for lychee.
+      run: | # zizmor: ignore[github-env]
+        set -euo pipefail
+        if command -v rg >/dev/null 2>&1; then
+          echo "ripgrep already on PATH: $(rg --version | head -1)"
+          exit 0
+        fi
+        case "$(uname -m)" in
+          x86_64) target=x86_64-unknown-linux-musl; sha="$RG_SHA256_AMD64" ;;
+          aarch64|arm64) target=aarch64-unknown-linux-gnu; sha="$RG_SHA256_ARM64" ;;
+          *) echo "::error::no pinned ripgrep release for architecture $(uname -m)"; exit 1 ;;
+        esac
+        mkdir -p "$HOME/.local/bin"
+        tarball="ripgrep-${RG_VERSION}-${target}.tar.gz"
+        url="https://github.com/BurntSushi/ripgrep/releases/download/${RG_VERSION}/${tarball}"
+        curl -sSfL -o "$tarball" "$url"
+        echo "${sha}  ${tarball}" | sha256sum -c -
+        tar -xzf "$tarball" --strip-components=1 "ripgrep-${RG_VERSION}-${target}/rg"
+        install -m 0755 rg "$HOME/.local/bin/rg"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    - name: Scan tree for forbidden content
+      shell: bash
+      env:
+        PATTERNS_FILE: ${{ inputs.patterns-file }}
+        PATTERNS_SECRET: ${{ inputs.patterns-secret }}
+        SCAN_PATHS: ${{ inputs.paths }}
+        REDACT: ${{ inputs.redact-matches }}
+        PCRE2: ${{ inputs.pcre2 }}
+      run: "${GITHUB_ACTION_PATH}/../../scripts/content-scan.sh"

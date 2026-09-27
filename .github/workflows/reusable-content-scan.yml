@@ -3,14 +3,29 @@
 # would leak in a public repo but that gitleaks does not flag because
 # they are not secrets.
 #
-# The pattern file lives in the CALLER repo (default
-# .github/content-scan-patterns.txt) — this reusable ships no wordlist,
-# so gh-workflows itself stays free of any consumer's private tokens.
+# Patterns come from a file committed in the CALLER repo (default
+# .github/content-scan-patterns.txt), an optional secrets.patterns, or both —
+# this reusable ships no wordlist itself, so gh-workflows stays free of any
+# consumer's private tokens. A public caller should put its actually-private
+# names (hostnames, codenames, personal names) in the secret, not the
+# committed file, since a public repo's committed file is itself world
+# readable; keep generic/structural patterns (RFC1918 ranges, journal-voice
+# phrases) in the file. See templates/content-scan.yml.
 #
-# Pattern file format: one ripgrep regex per line. `#` starts a line
-# comment. Blank lines and comment lines are ignored.
+# Pattern format (file and secret alike): one ripgrep regex per line. `#`
+# starts a line comment. Blank lines and comment lines are ignored.
 #
-# Caller stub: see templates/content-scan.yml.
+# When secrets.patterns is used, findings are reported as path:line only —
+# never the matched text — because public Actions logs are world-readable and
+# GitHub's secret masking will not catch a single matched name out of a
+# multi-line secret. redact-matches lets a caller force this either way; it
+# defaults to "auto" (on iff secrets.patterns is set) to keep today's
+# full-line output for existing callers using only the committed file.
+#
+# The scan logic and the pinned+verified ripgrep install both live in
+# actions/content-scan (a composite action), not inline here, so they are
+# unit-testable (scripts/tests/test_content_scan.py) and reachable without a
+# second checkout of this repo.
 name: Reusable Content Scan
 
 on:
@@ -22,11 +37,29 @@ on:
       patterns-file:
         type: string
         default: .github/content-scan-patterns.txt
-        description: Path (in the caller repo) to the ripgrep patterns file.
+        description: Path (in the caller repo) to the ripgrep patterns file. Optional if secrets.patterns is set.
       paths:
         type: string
         default: .
         description: Space-separated paths to scan. Defaults to the whole tree.
+      redact-matches:
+        type: string
+        default: auto
+        description: >-
+          auto (redact iff secrets.patterns is set) | true | false. Redacted
+          findings report path:line only, never the matched text.
+      pcre2:
+        type: boolean
+        default: false
+        description: Enable PCRE2 (-P) for lookaround patterns, e.g. /home/(?!dev|user|runner).
+    secrets:
+      patterns:
+        required: false
+        description: >-
+          Newline-separated ripgrep regexes, same format as patterns-file.
+          Put private names here for a public caller; merged with
+          patterns-file when both are set. Either patterns-file or this
+          secret must resolve to at least one pattern.
 
 permissions:
   contents: read
@@ -41,48 +74,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Verify patterns file exists
-        env:
-          PATTERNS_FILE: ${{ inputs.patterns-file }}
-        run: |
-          if [ ! -f "$PATTERNS_FILE" ]; then
-            echo "::error::patterns file not found at $PATTERNS_FILE"
-            echo "Create it in the caller repo, or set patterns-file to another path."
-            exit 1
-          fi
-          echo "Using patterns file: $PATTERNS_FILE"
-          echo "Active patterns (comments/blanks stripped):"
-          grep -vE '^\s*(#|$)' "$PATTERNS_FILE" | sed 's/^/  /'
-
-      - name: Scan tree for forbidden content
-        env:
-          PATTERNS_FILE: ${{ inputs.patterns-file }}
-          SCAN_PATHS: ${{ inputs.paths }}
-        run: |
-          set -uo pipefail
-          # Strip comments and blank lines into a runtime pattern file.
-          RUNTIME_PATTERNS=$(mktemp)
-          trap 'rm -f "$RUNTIME_PATTERNS"' EXIT
-          grep -vE '^\s*(#|$)' "$PATTERNS_FILE" > "$RUNTIME_PATTERNS"
-          if [ ! -s "$RUNTIME_PATTERNS" ]; then
-            echo "No active patterns in $PATTERNS_FILE — nothing to scan."
-            exit 0
-          fi
-          # rg -f: patterns from file. -n: line numbers. --hidden: include
-          # dotfiles. --glob '!.git': skip git internals. The patterns file
-          # itself is excluded so its own regexes do not self-match. -S:
-          # smart case. Exit status: 0 = matches, 1 = no matches, 2 = error.
-          # We invert: matches → fail; no matches → pass; error → surface.
-          # shellcheck disable=SC2086
-          if rg -n -S --hidden --glob '!.git' --glob "!$PATTERNS_FILE" -f "$RUNTIME_PATTERNS" $SCAN_PATHS; then
-            echo
-            echo "::error::content-scan found forbidden patterns above. Remove them, or update $PATTERNS_FILE if the pattern is stale."
-            exit 1
-          fi
-          rc=$?
-          if [ "$rc" = "1" ]; then
-            echo "content-scan clean."
-            exit 0
-          fi
-          echo "::error::ripgrep exited with $rc"
-          exit "$rc"
+      - uses: Ait0u5hi/gh-workflows/actions/content-scan@v1  # zizmor: ignore[unpinned-uses]
+        with:
+          patterns-file: ${{ inputs.patterns-file }}
+          patterns-secret: ${{ secrets.patterns }}
+          paths: ${{ inputs.paths }}
+          redact-matches: ${{ inputs.redact-matches }}
+          pcre2: ${{ inputs.pcre2 }}
