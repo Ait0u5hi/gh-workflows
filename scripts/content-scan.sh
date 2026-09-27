@@ -90,10 +90,18 @@ rg_args+=(-f "$RUNTIME_PATTERNS")
 # Exit status: 0 = matches, 1 = no matches, 2 = error. We invert: matches ->
 # fail; no matches -> pass; error -> surface. Run the pipeline directly
 # (never through a command substitution) so PIPESTATUS reflects rg itself,
-# not `cut`/`sort`.
+# not `sed`/`sort`.
 # shellcheck disable=SC2086  # SCAN_PATHS is intentionally word-split
 if $redact; then
-  rg "${rg_args[@]}" --no-heading -o $SCAN_PATHS | cut -d: -f1,2 | sort -u
+  # -H: always print the filename, even for a single-file target (rg omits it
+  # otherwise, which used to shift the matched text into the path:line cut).
+  # -o -r '': replace the match itself with nothing so the text never reaches
+  # the pipe, instead of printing the full line and cutting fields — a `cut
+  # -d: -f1,2` breaks the moment the path itself contains a colon (Windows
+  # paths). -r '' output always ends in a bare trailing colon (path:line:),
+  # which the trailing-colon strip below removes without touching colons
+  # that are part of the path.
+  rg "${rg_args[@]}" --no-heading -H -o -r '' $SCAN_PATHS | sed 's/:$//' | sort -u
   rc=${PIPESTATUS[0]}
 else
   rg "${rg_args[@]}" $SCAN_PATHS
