@@ -7,6 +7,7 @@ Runs the real script as a subprocess against a throwaway tree with a real
 re-implementing its behavior in Python — the point is to catch drift between
 the script and what the workflow actually invokes.
 """
+import re
 import shutil
 import subprocess
 import tempfile
@@ -90,6 +91,27 @@ class TestSecretOnly(unittest.TestCase):
             r = t.run(patterns_file=".github/does-not-exist.txt",
                       patterns_secret="# a comment\n\nalpha\n")
             self.assertEqual(r.returncode, 1)
+
+    def test_single_file_target_still_redacts(self):
+        # ripgrep omits the filename when the scan target is a single file
+        # (unlike a directory target), so a caller passing e.g. `paths:
+        # README.md` used to leak the matched secret text into the output.
+        with Tree(**{"leaky.txt": "the alpha secret is here\n"}) as t:
+            r = t.run(patterns_file=".github/does-not-exist.txt",
+                      patterns_secret="alpha\n", paths="leaky.txt")
+            self.assertEqual(r.returncode, 1)
+            self.assertNotIn("alpha", r.stdout)
+            self.assertRegex(r.stdout, re.compile(r"^leaky\.txt:1$", re.MULTILINE))
+
+    def test_colon_in_path_is_not_mistaken_for_a_field_separator(self):
+        # A naive `path:line:match` split on the first colons breaks once the
+        # path itself contains one (e.g. Windows drive-letter paths).
+        with Tree(**{"sub/fi:le.txt": "the alpha secret is here\n"}) as t:
+            r = t.run(patterns_file=".github/does-not-exist.txt",
+                      patterns_secret="alpha\n")
+            self.assertEqual(r.returncode, 1)
+            self.assertNotIn("alpha", r.stdout)
+            self.assertRegex(r.stdout, re.compile(r"^\./sub/fi:le\.txt:1$", re.MULTILINE))
 
 
 class TestBoth(unittest.TestCase):
