@@ -28,6 +28,15 @@ tags callers pin (`@v1`). See [README → Versioning](README.md#versioning).
   a patterns file behaves exactly as before.
 
 ### Fixed
+- `actions/content-scan`: the "install ripgrep if missing" step now also installs the
+  pinned, SHA-256-verified `rg` when `pcre2: true` is requested but the `rg` already on
+  PATH was built without PCRE2 (a self-hosted runner's distro package, for example) —
+  previously it skipped installation whenever *any* `rg` was present, so a caller with
+  `pcre2: true` failed with "PCRE2 is not available in this build of ripgrep" even
+  though the step reported success. The install-vs-skip decision moved to
+  `scripts/rg-need-install.sh` (unit-tested in `scripts/tests/test_rg_need_install.py`),
+  and the scan step now receives the exact binary to use via an `RG_BIN` env var rather
+  than relying solely on `$GITHUB_PATH` ordering.
 - `reusable-release.yml` no longer hardcodes `main` for checkout/push-back.
 - `reusable-codeql.yml` `continue-on-error` narrowed to the SARIF-upload step so
   genuine CodeQL misconfig fails the job again.

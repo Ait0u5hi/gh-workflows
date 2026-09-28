@@ -9,12 +9,14 @@ the script and what the workflow actually invokes.
 """
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "content-scan.sh"
+REAL_RG = shutil.which("rg")
 
 
 class Tree:
@@ -28,16 +30,18 @@ class Tree:
             p.write_text(content)
 
     def run(self, patterns_file=".github/content-scan-patterns.txt", patterns_secret="",
-             paths=".", redact="auto", pcre2="false"):
+             paths=".", redact="auto", pcre2="false", rg_bin=None, path="/usr/bin:/bin:/usr/local/bin"):
         env = {
             "PATTERNS_FILE": patterns_file,
             "PATTERNS_SECRET": patterns_secret,
             "SCAN_PATHS": paths,
             "REDACT": redact,
             "PCRE2": pcre2,
-            "PATH": "/usr/bin:/bin:/usr/local/bin",
+            "PATH": path,
             "HOME": str(self.dir),
         }
+        if rg_bin is not None:
+            env["RG_BIN"] = rg_bin
         return subprocess.run(
             ["bash", str(SCRIPT)], cwd=self.dir, env=env,
             capture_output=True, text=True, timeout=30,
@@ -190,6 +194,58 @@ class TestPcre2(unittest.TestCase):
             r = t.run(patterns_file=".github/does-not-exist.txt",
                       patterns_secret=r"home/(?!dev|user|runner)", pcre2="true")
             self.assertEqual(r.returncode, 1)
+            self.assertIn("./unguarded.txt", r.stdout)
+            self.assertNotIn("./guarded.txt", r.stdout)
+
+
+class TestRgBin(unittest.TestCase):
+    """actions/content-scan hands the script an explicit RG_BIN (the exact
+    binary the install step decided on) rather than relying solely on
+    $GITHUB_PATH prepending correctly. These tests put a PCRE2-incapable
+    stub `rg` first on PATH — mimicking a self-hosted runner's distro
+    package — and check that RG_BIN, not PATH order, decides which binary
+    actually runs the scan.
+    """
+
+    def setUp(self):
+        if REAL_RG is None:
+            self.skipTest("no real rg on PATH in this environment")
+        self.stub_dir = Path(tempfile.mkdtemp())
+        stub_rg = self.stub_dir / "rg"
+        stub_rg.write_text(
+            "#!/bin/bash\n"
+            'case "$1" in\n'
+            '  --version) echo "ripgrep 13.0.0 (rev fake)"; exit 0 ;;\n'
+            '  --pcre2-version) echo "PCRE2 is not available in this build of ripgrep" >&2; exit 1 ;;\n'
+            "  *) exit 2 ;;\n"
+            "esac\n"
+        )
+        stub_rg.chmod(stub_rg.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+        self.path = f"{self.stub_dir}:/usr/bin:/bin"
+
+    def tearDown(self):
+        shutil.rmtree(self.stub_dir, ignore_errors=True)
+
+    def test_without_rg_bin_the_path_first_stub_is_used_and_pcre2_fails(self):
+        with Tree(**{
+            "guarded.txt": "home/dev/x\n",
+            "unguarded.txt": "home/other/x\n",
+        }) as t:
+            r = t.run(patterns_file=".github/does-not-exist.txt",
+                      patterns_secret=r"home/(?!dev|user|runner)", pcre2="true",
+                      path=self.path)
+            self.assertNotEqual(r.returncode, 1, "expected an rg error from the PCRE2-incapable stub")
+
+    def test_rg_bin_overrides_path_order(self):
+        with Tree(**{
+            "guarded.txt": "home/dev/x\n",
+            "unguarded.txt": "home/other/x\n",
+        }) as t:
+            r = t.run(patterns_file=".github/does-not-exist.txt",
+                      patterns_secret=r"home/(?!dev|user|runner)", pcre2="true",
+                      path=self.path, rg_bin=REAL_RG)
+            self.assertEqual(r.returncode, 1)
+            self.assertIn(f"Using rg: {REAL_RG}", r.stdout)
             self.assertIn("./unguarded.txt", r.stdout)
             self.assertNotIn("./guarded.txt", r.stdout)
 
