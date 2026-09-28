@@ -16,6 +16,7 @@
 #   SCAN_PATHS      space-separated paths to scan (word-split intentionally)
 #   REDACT          auto|true|false (default: auto — redact iff PATTERNS_SECRET is non-empty)
 #   PCRE2           true|false (default: false) — adds -P for lookaround patterns
+#   RG_BIN          ripgrep binary/path to use (default: rg, resolved from PATH)
 #
 # Exit status: 0 = clean, 1 = forbidden patterns found (or a bad REDACT value),
 # anything else = ripgrep itself errored.
@@ -26,6 +27,14 @@ PATTERNS_SECRET="${PATTERNS_SECRET:-}"
 SCAN_PATHS="${SCAN_PATHS:-.}"
 REDACT="${REDACT:-auto}"
 PCRE2="${PCRE2:-false}"
+RG_BIN="${RG_BIN:-rg}"
+
+echo "Using rg: $RG_BIN ($("$RG_BIN" --version | head -1))"
+if "$RG_BIN" --pcre2-version >/dev/null 2>&1; then
+  echo "PCRE2: $("$RG_BIN" --pcre2-version)"
+else
+  echo "PCRE2: not available in this build"
+fi
 
 have_file=false
 if [ -n "$PATTERNS_FILE" ] && [ -f "$PATTERNS_FILE" ]; then
@@ -101,10 +110,10 @@ if $redact; then
   # paths). -r '' output always ends in a bare trailing colon (path:line:),
   # which the trailing-colon strip below removes without touching colons
   # that are part of the path.
-  rg "${rg_args[@]}" --no-heading -H -o -r '' $SCAN_PATHS | sed 's/:$//' | sort -u
+  "$RG_BIN" "${rg_args[@]}" --no-heading -H -o -r '' $SCAN_PATHS | sed 's/:$//' | sort -u
   rc=${PIPESTATUS[0]}
 else
-  rg "${rg_args[@]}" $SCAN_PATHS
+  "$RG_BIN" "${rg_args[@]}" $SCAN_PATHS
   rc=$?
 fi
 
