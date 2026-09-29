@@ -6,7 +6,15 @@ Runs the real script as a subprocess against a throwaway tree with a real
 `rg` on PATH (this repo's CI already has ripgrep available), rather than
 re-implementing its behavior in Python — the point is to catch drift between
 the script and what the workflow actually invokes.
+
+The PCRE2 tests need a ripgrep built with PCRE2, which some distro packages
+are not. They use the rg named by the RG_BIN environment variable when it is
+set, else the rg on the pinned test PATH, and skip with a reason naming
+RG_BIN only when that rg fails `--pcre2-version`. A PCRE2-capable rg runs
+every assertion unchanged, so a run that enforces this suite should supply
+one and treat any skip as a failure.
 """
+import os
 import re
 import shutil
 import stat
@@ -17,6 +25,33 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "content-scan.sh"
 REAL_RG = shutil.which("rg")
+PINNED_PATH = "/usr/bin:/bin:/usr/local/bin"
+
+
+def resolve_rg():
+    """The rg the PCRE2 tests use: RG_BIN when set, else rg on PINNED_PATH."""
+    rg_bin = os.environ.get("RG_BIN")
+    if rg_bin:
+        return shutil.which(rg_bin) or rg_bin
+    return shutil.which("rg", path=PINNED_PATH)
+
+
+def pcre2_rg_or_skip(test):
+    """Return the resolved rg if it answers `--pcre2-version`, else skip the
+    test with a reason naming RG_BIN (never a silent pass)."""
+    rg = resolve_rg()
+    ok = False
+    if rg is not None:
+        try:
+            ok = subprocess.run([rg, "--pcre2-version"], capture_output=True,
+                                timeout=10).returncode == 0
+        except OSError:
+            ok = False
+    if not ok:
+        found = f"{rg} fails --pcre2-version" if rg else f"no rg on {PINNED_PATH}"
+        test.skipTest(f"no PCRE2-capable rg ({found}); "
+                      "set RG_BIN to a ripgrep built with PCRE2 to run this test")
+    return rg
 
 
 class Tree:
@@ -30,7 +65,7 @@ class Tree:
             p.write_text(content)
 
     def run(self, patterns_file=".github/content-scan-patterns.txt", patterns_secret="",
-             paths=".", redact="auto", pcre2="false", rg_bin=None, path="/usr/bin:/bin:/usr/local/bin"):
+             paths=".", redact="auto", pcre2="false", rg_bin=None, path=PINNED_PATH):
         env = {
             "PATTERNS_FILE": patterns_file,
             "PATTERNS_SECRET": patterns_secret,
@@ -183,16 +218,19 @@ class TestPcre2(unittest.TestCase):
         }) as t:
             # Without -P, ripgrep rejects the lookaround pattern outright.
             r = t.run(patterns_file=".github/does-not-exist.txt",
-                      patterns_secret=r"home/(?!dev|user|runner)", pcre2="false")
+                      patterns_secret=r"home/(?!dev|user|runner)", pcre2="false",
+                      rg_bin=resolve_rg())
             self.assertNotEqual(r.returncode, 1, "expected an rg error, not a clean 'no match'")
 
     def test_lookaround_pattern_with_pcre2_matches_only_the_unguarded_path(self):
+        rg = pcre2_rg_or_skip(self)
         with Tree(**{
             "guarded.txt": "home/dev/x\n",
             "unguarded.txt": "home/other/x\n",
         }) as t:
             r = t.run(patterns_file=".github/does-not-exist.txt",
-                      patterns_secret=r"home/(?!dev|user|runner)", pcre2="true")
+                      patterns_secret=r"home/(?!dev|user|runner)", pcre2="true",
+                      rg_bin=rg)
             self.assertEqual(r.returncode, 1)
             self.assertIn("./unguarded.txt", r.stdout)
             self.assertNotIn("./guarded.txt", r.stdout)
@@ -237,15 +275,16 @@ class TestRgBin(unittest.TestCase):
             self.assertNotEqual(r.returncode, 1, "expected an rg error from the PCRE2-incapable stub")
 
     def test_rg_bin_overrides_path_order(self):
+        rg = pcre2_rg_or_skip(self)
         with Tree(**{
             "guarded.txt": "home/dev/x\n",
             "unguarded.txt": "home/other/x\n",
         }) as t:
             r = t.run(patterns_file=".github/does-not-exist.txt",
                       patterns_secret=r"home/(?!dev|user|runner)", pcre2="true",
-                      path=self.path, rg_bin=REAL_RG)
+                      path=self.path, rg_bin=rg)
             self.assertEqual(r.returncode, 1)
-            self.assertIn(f"Using rg: {REAL_RG}", r.stdout)
+            self.assertIn(f"Using rg: {rg}", r.stdout)
             self.assertIn("./unguarded.txt", r.stdout)
             self.assertNotIn("./guarded.txt", r.stdout)
 
