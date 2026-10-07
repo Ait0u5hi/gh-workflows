@@ -141,6 +141,62 @@ class SyncLabels(unittest.TestCase):
                      if c[:2] == ["label", "create"] and "EXAMPLE-owner/b" in c]
         self.assertEqual(len(b_creates), len(EXPECTED))
 
+    def _held_all_but(self, skip):
+        return [{"name": lab["name"], "color": lab["color"], "description": lab["description"]}
+                for lab in sl.load_taxonomy() if lab["name"] != skip]
+
+    def _mutations(self):
+        return [c for c in self.gh.calls() if c[:2] != ["label", "list"]]
+
+    def test_case_only_difference_is_reported_not_created(self):
+        tax = {lab["name"]: lab for lab in sl.load_taxonomy()}
+        held = self._held_all_but("type:bug")
+        # Different color AND description: still must not be touched.
+        held.append({"name": "Type:Bug", "color": "000000", "description": "old"})
+        self.gh.holds("EXAMPLE-owner/a", held)
+        for argv in (["EXAMPLE-owner/a"], ["--apply", "EXAMPLE-owner/a"]):
+            with self.subTest(argv=argv):
+                rc, out, _ = run(argv)
+                self.assertEqual(rc, 0)
+                self.assertIn("case-mismatch", out)
+                self.assertIn("Type:Bug", out)
+                self.assertIn("type:bug", out)
+                self.assertEqual(self._mutations(), [])
+        self.assertIn("type:bug", tax)
+
+    def test_exact_case_match_still_wins_and_updates(self):
+        held = self._held_all_but("type:bug")
+        held.append({"name": "type:bug", "color": "000000", "description": "old"})
+        self.gh.holds("EXAMPLE-owner/a", held)
+        rc, out, _ = run(["--apply", "EXAMPLE-owner/a"])
+        self.assertEqual(rc, 0)
+        self.assertNotIn("case-mismatch", out)
+        self.assertEqual([c[2] for c in self._mutations()], ["type:bug"])
+
+    def test_two_existing_labels_differing_only_by_case_are_reported(self):
+        held = self._held_all_but("type:bug")
+        held += [{"name": "Type:Bug", "color": "ffffff", "description": "x"},
+                 {"name": "TYPE:BUG", "color": "ffffff", "description": "y"}]
+        self.gh.holds("EXAMPLE-owner/a", held)
+        rc, out, _ = run(["--apply", "EXAMPLE-owner/a"])
+        self.assertEqual(rc, 0)
+        self.assertIn("case-mismatch", out)
+        self.assertIn("Type:Bug", out)
+        self.assertIn("TYPE:BUG", out)
+        self.assertEqual(self._mutations(), [])
+
+    def test_exact_among_case_duplicates_is_used(self):
+        held = self._held_all_but("type:bug")
+        held += [{"name": "Type:Bug", "color": "ffffff", "description": "x"},
+                 {"name": "type:bug", "color": "ffffff", "description": "y"}]
+        self.gh.holds("EXAMPLE-owner/a", held)
+        rc, out, _ = run(["--apply", "EXAMPLE-owner/a"])
+        self.assertEqual([c[2] for c in self._mutations()], ["type:bug"])
+        self.assertNotIn("case-mismatch", out)
+
+    def test_help_documents_case_mismatch(self):
+        self.assertIn("case-mismatch", sl.__doc__)
+
 
 if __name__ == "__main__":
     unittest.main()
