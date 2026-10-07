@@ -74,6 +74,10 @@ jobs:
             && tar -xzf "$tarball" --strip-components=1 "ripgrep-${RG_VERSION}-x86_64-unknown-linux-musl/rg")
           sudo install -m 0755 "$RUNNER_TEMP/rg" /usr/local/bin/rg
           /usr/local/bin/rg --pcre2-version
+      # test_sync_labels and test_pr_title_pattern read YAML; setup-python's
+      # interpreter has no PyYAML.
+      - name: Install PyYAML (pinned)
+        run: pip install --quiet pyyaml==6.0.3
       # Every test must run: a skip here means a prerequisite went missing.
       - name: unittest (scripts/tests)
         env:
