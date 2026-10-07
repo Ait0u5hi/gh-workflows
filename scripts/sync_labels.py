@@ -26,8 +26,22 @@ Usage (from the repo root):
     python3 scripts/sync_labels.py OWNER/REPO [OWNER/REPO ...]           # plan
     python3 scripts/sync_labels.py --apply OWNER/REPO [OWNER/REPO ...]   # apply
 
-Exit 0 when every repo converged (or would), 1 when any repo failed; a
-failure on one repo does not stop the others.
+Exit status (dry run and --apply alike — a dry run never calls the mutating
+`gh label create`, it only plans and prints what --apply would do):
+    0  every repo converged (or would): no gh failure, no case-mismatch.
+    1  at least one repo's gh call failed (API/auth error, timeout, missing
+       gh, a repo that does not exist, ...). A failure on one repo does not
+       stop the others. This code wins even when a case-mismatch ALSO
+       occurred in the same run: a scheduled --apply run must never read
+       "exit 1" as "only a rename is pending" when a repo actually failed.
+    3  no repo failed, but at least one label is a case-mismatch: every
+       repo's gh calls succeeded, yet something is still not converged and
+       needs a human to rename a label by hand before the next run. Exit 3
+       is distinct from 0 so a scheduled run notices instead of silently
+       exiting clean, and distinct from 1 so "needs a rename" and "gh is
+       broken" are never confused by a caller checking $?. Either way a
+       stderr footer reports the count: "N label(s) need a manual case
+       rename".
 """
 import argparse
 import json
@@ -38,6 +52,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LABELS_FILE = REPO_ROOT / "labels.yml"
 GH_TIMEOUT_S = 60
+
+EXIT_OK = 0
+EXIT_ERROR = 1
+EXIT_CASE_MISMATCH = 3
 
 
 class SyncError(Exception):
@@ -99,12 +117,16 @@ def plan(taxonomy, existing):
 
 
 def sync_repo(repo, taxonomy, apply):
+    """Sync one repo. Returns the number of case-mismatch labels found (0 if
+    none converge-but-for-a-rename). Raises SyncError on a gh failure."""
     actions = plan(taxonomy, current_labels(repo))
     if not actions:
         print(f"{repo}: up to date")
-        return
+        return 0
+    case_mismatches = 0
     for action, lab, detail in actions:
         if action == "case-mismatch":
+            case_mismatches += 1
             print(f"{repo}: case-mismatch {lab['name']} (repo has {detail}); "
                   "left untouched, rename by hand")
             continue
@@ -115,6 +137,7 @@ def sync_repo(repo, taxonomy, apply):
             # place. It never renames and never deletes.
             gh("label", "create", lab["name"], "--color", lab["color"],
                "--description", lab["description"], "--force", "-R", repo)
+    return case_mismatches
 
 
 def main(argv=None):
@@ -127,18 +150,26 @@ def main(argv=None):
         taxonomy = load_taxonomy()
     except SyncError as e:
         print(f"sync_labels: {e}", file=sys.stderr)
-        return 1
+        return EXIT_ERROR
     failed = []
+    case_mismatch_total = 0
     for repo in args.repos:
         try:
-            sync_repo(repo, taxonomy, args.apply)
+            case_mismatch_total += sync_repo(repo, taxonomy, args.apply)
         except SyncError as e:
             print(f"{repo}: FAILED: {e}", file=sys.stderr)
             failed.append(repo)
+    if case_mismatch_total:
+        print(f"sync_labels: {case_mismatch_total} label(s) need a manual case rename",
+              file=sys.stderr)
     if failed:
         print(f"sync_labels: {len(failed)} repo(s) failed: {', '.join(failed)}", file=sys.stderr)
-        return 1
-    return 0
+        # Error wins: a gh failure must never be masked by the (lower-severity,
+        # still-nonzero) case-mismatch code in the same run.
+        return EXIT_ERROR
+    if case_mismatch_total:
+        return EXIT_CASE_MISMATCH
+    return EXIT_OK
 
 
 if __name__ == "__main__":

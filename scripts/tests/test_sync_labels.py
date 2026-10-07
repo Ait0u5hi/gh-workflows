@@ -156,13 +156,25 @@ class SyncLabels(unittest.TestCase):
         self.gh.holds("EXAMPLE-owner/a", held)
         for argv in (["EXAMPLE-owner/a"], ["--apply", "EXAMPLE-owner/a"]):
             with self.subTest(argv=argv):
-                rc, out, _ = run(argv)
-                self.assertEqual(rc, 0)
+                rc, out, err = run(argv)
+                # A case-mismatch is NOT full convergence: a scheduled
+                # --apply run must see a distinct nonzero code, not 0, or it
+                # silently never notices the pending rename (fleet-harness
+                # follow-up from PR #50/#51 review: exit 0 hid this).
+                self.assertEqual(rc, sl.EXIT_CASE_MISMATCH)
                 self.assertIn("case-mismatch", out)
                 self.assertIn("Type:Bug", out)
                 self.assertIn("type:bug", out)
+                self.assertIn("1 label(s) need a manual case rename", err)
                 self.assertEqual(self._mutations(), [])
         self.assertIn("type:bug", tax)
+
+    def test_case_mismatch_alone_is_a_distinct_code_from_error(self):
+        """The case-mismatch code must not collide with the gh-failure code
+        (1) or success (0) — a caller checking $? needs to tell the three
+        apart without parsing output."""
+        self.assertNotEqual(sl.EXIT_CASE_MISMATCH, sl.EXIT_OK)
+        self.assertNotEqual(sl.EXIT_CASE_MISMATCH, sl.EXIT_ERROR)
 
     def test_exact_case_match_still_wins_and_updates(self):
         held = self._held_all_but("type:bug")
@@ -178,11 +190,30 @@ class SyncLabels(unittest.TestCase):
         held += [{"name": "Type:Bug", "color": "ffffff", "description": "x"},
                  {"name": "TYPE:BUG", "color": "ffffff", "description": "y"}]
         self.gh.holds("EXAMPLE-owner/a", held)
-        rc, out, _ = run(["--apply", "EXAMPLE-owner/a"])
-        self.assertEqual(rc, 0)
+        rc, out, err = run(["--apply", "EXAMPLE-owner/a"])
+        self.assertEqual(rc, sl.EXIT_CASE_MISMATCH)
         self.assertIn("case-mismatch", out)
         self.assertIn("Type:Bug", out)
         self.assertIn("TYPE:BUG", out)
+        self.assertIn("1 label(s) need a manual case rename", err)
+        self.assertEqual(self._mutations(), [])
+
+    def test_error_wins_over_case_mismatch_in_the_same_run(self):
+        """The ATTACK SURFACE case: one repo fails (gh/API error) while
+        another repo in the SAME run only has a case-mismatch. The run must
+        exit with the ERROR code, never the case-mismatch code — a scheduled
+        --apply run checking $? == EXIT_CASE_MISMATCH to mean 'just a rename
+        pending' must not be fooled into ignoring a real failure."""
+        held = self._held_all_but("type:bug")
+        held.append({"name": "Type:Bug", "color": "ffffff", "description": "x"})
+        self.gh.holds("EXAMPLE-owner/a", held)
+        rc, _, err = run(["--apply", "EXAMPLE-owner/broken", "EXAMPLE-owner/a"])
+        self.assertEqual(rc, sl.EXIT_ERROR)
+        self.assertNotEqual(rc, sl.EXIT_CASE_MISMATCH)
+        self.assertIn("EXAMPLE-owner/broken: FAILED", err)
+        # Both conditions are still reported, even though the error wins the
+        # exit code — a human reading stderr sees the full picture.
+        self.assertIn("1 label(s) need a manual case rename", err)
         self.assertEqual(self._mutations(), [])
 
     def test_exact_among_case_duplicates_is_used(self):
@@ -196,6 +227,23 @@ class SyncLabels(unittest.TestCase):
 
     def test_help_documents_case_mismatch(self):
         self.assertIn("case-mismatch", sl.__doc__)
+
+    def test_docstring_documents_the_exit_codes(self):
+        doc = sl.__doc__
+        self.assertIn("0  every repo converged", doc)
+        self.assertIn("1  at least one repo's gh call failed", doc)
+        self.assertIn("3  no repo failed, but at least one label is a case-mismatch", doc)
+        # The "error wins" rule must be spelled out, not just implemented.
+        self.assertIn("wins even when a case-mismatch", doc)
+
+    def test_readme_documents_the_exit_codes(self):
+        """Keep README and the docstring from drifting apart the way a pin's
+        SHA and its `# vX.Y.Z` comment once did (see test_action_pins.py)."""
+        readme = (Path(__file__).resolve().parents[2] / "README.md").read_text(encoding="utf-8")
+        self.assertIn("sync_labels.py", readme)
+        self.assertIn("case-mismatch", readme.lower())
+        self.assertIn("exit 3", readme.lower())
+        self.assertIn("manual case rename", readme.lower())
 
 
 if __name__ == "__main__":

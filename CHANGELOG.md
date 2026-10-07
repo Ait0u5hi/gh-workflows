@@ -6,6 +6,14 @@ tags callers pin (`@v1`). See [README → Versioning](README.md#versioning).
 
 ## [Unreleased]
 
+### Fixed
+- `scripts/sync_labels.py`: a case-mismatch used to exit 0 with no summary, so a
+  scheduled `--apply` run could never notice it. It now prints a stderr footer
+  ("N label(s) need a manual case rename") and exits with a new, distinct code
+  (3) when the only problem is a pending rename — 0 still means full
+  convergence, and 1 (a `gh` API/auth failure) always wins over 3 even when
+  both occur in the same run. See README → Label sync for the exit-code table.
+
 ### Added
 - `labels.yml` + `scripts/sync_labels.py`: the shared issue-label taxonomy
   (`type:bug|friction|gap|debt|flaky`, `source:agent|human`, `status:carded`) and an
