@@ -12,7 +12,7 @@ discoverable, and is it worth doing?
   is not Marketplace-eligible regardless of what we do.
 - **Composite actions** are eligible, but Marketplace lists **one action per repo,
   at the repo root**. This repo keeps its actions under `actions/*/action.yml`
-  (subdirectories), which are usable via `uses: owner/repo/actions/name@ref` but
+  (subdirectories), which are usable via `uses: owner/repo/actions/name@<ref>` but
   are **not** Marketplace-listable from subdirectories.
 
 So the only Marketplace-eligible assets are the two generic composite actions:
