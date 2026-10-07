@@ -17,6 +17,13 @@ tags callers pin (`@v1`). See [README → Versioning](README.md#versioning).
   checker's stdout (e.g. for its "NOT-APPLICABLE" line) to decide pass/fail,
   since that text can also appear in a genuinely-failing run (a matched
   source line, or a file literally named `NOT-APPLICABLE.py`).
+- `ci.yml` unit-tests job: the pinned ripgrep install is x86_64/amd64 only.
+  It now checks `runner.arch` first and fails the job loudly (`::error::`,
+  exit 1) on anything else, before any download — previously an
+  arm64/other runner would hit this step blind and either get a cryptic
+  "exec format error" well into the job, or (worse, if ripgrep happened to
+  run under emulation) silently never exercise the pinned binary the tests
+  assume.
 - `scripts/sync_labels.py`: a case-mismatch used to exit 0 with no summary, so a
   scheduled `--apply` run could never notice it. It now prints a stderr footer
   ("N label(s) need a manual case rename") and exits with a new, distinct code

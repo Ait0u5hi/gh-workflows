@@ -66,8 +66,20 @@ jobs:
         env:
           RG_VERSION: "14.1.1"
           RG_SHA256_AMD64: 4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e # x86_64-unknown-linux-musl
+          RUNNER_ARCH: ${{ runner.arch }}
         run: |
           set -euo pipefail
+          # Only an X64 (amd64) build of rg is pinned above. Fail loudly —
+          # before any download — on anything else instead of silently
+          # skipping the PCRE2 ripgrep tests: a skip here would let an
+          # arm64/other runner report this job green while never actually
+          # running the content-scan rg tests, and the "no skipped=" guard
+          # below only catches a skipped *test*, not a job that quietly
+          # never reached them.
+          if [ "$RUNNER_ARCH" != "X64" ]; then
+            echo "::error::ripgrep here is pinned for runner.arch=X64 only; got '$RUNNER_ARCH'. Add an arch pin, do not skip." >&2
+            exit 1
+          fi
           tarball="ripgrep-${RG_VERSION}-x86_64-unknown-linux-musl.tar.gz"
           curl -sSfL -o "$RUNNER_TEMP/$tarball" "https://github.com/BurntSushi/ripgrep/releases/download/${RG_VERSION}/${tarball}"
           (cd "$RUNNER_TEMP" && echo "${RG_SHA256_AMD64}  ${tarball}" | sha256sum -c - \
