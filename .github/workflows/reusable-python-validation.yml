@@ -49,7 +49,7 @@ jobs:
           python-version: ${{ inputs.python-version }}
       - name: Validate plugin.yaml
         run: |
-          pip install --quiet pyyaml
+          pip install --quiet pyyaml==6.0.3
           python - <<'EOF'
           import yaml
 
