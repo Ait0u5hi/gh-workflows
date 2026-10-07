@@ -22,7 +22,14 @@ Usage:
     python scripts/check-windows-footguns.py --diff main
 
 Exit status:
-    0 — no Windows footguns found (or all matches suppressed)
+    0 — no Windows footguns found (or all matches suppressed), OR zero Python
+        files were in scope. The zero-file case prints a distinct
+        "NOT-APPLICABLE: 0 python file(s) in scope (...)" line instead of the
+        "No Windows footguns found" pass line; it is NOT a pass. Exit stays 0
+        because the shared composite action can legitimately hand this script
+        a file list with nothing in scope (a deleted or excluded .py), and a
+        non-zero code would turn that job red. Callers that gate a handoff
+        should grep for NOT-APPLICABLE.
     1 — at least one unsuppressed match
 
 Suppress an intentional use (e.g. tests or platform-gated code) with:
@@ -736,6 +743,8 @@ def main(argv: list[str]) -> int:
 
     total_matches = 0
     files_scanned = 0
+    # Remember what was passed so a zero-scope run can say what it skipped.
+    passed = [] if args.all else [Path(r) for r in roots]
     for path in iter_files(roots):
         files_scanned += 1
         matches = scan_file(path, FOOTGUNS)
@@ -761,6 +770,13 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 1
+
+    if files_scanned == 0:
+        exts = sorted({p.suffix or "(no extension)" for p in passed})
+        detail = f"{len(passed)} skipped: {', '.join(exts)}" if passed else "0 skipped"
+        print(f"NOT-APPLICABLE: 0 python file(s) in scope ({detail}).")
+        print("  Nothing was checked; this is not a pass. The checker scans Python only.")
+        return 0
 
     print(
         f"✓ No Windows footguns found ({files_scanned} file(s) scanned)."

@@ -128,5 +128,37 @@ class AllScopeTests(unittest.TestCase):
             self.assertIn("bad.py:1:", proc.stdout)
 
 
+class NotApplicableTests(unittest.TestCase):
+    def test_no_python_files_prints_not_applicable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.js").write_text("x\n", encoding="utf-8")
+            (root / "b.mjs").write_text("x\n", encoding="utf-8")
+            (root / "c.sh").write_text("x\n", encoding="utf-8")
+            proc = run_script(["a.js", "b.mjs", "c.sh"], root)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn(
+                "NOT-APPLICABLE: 0 python file(s) in scope (3 skipped: .js, .mjs, .sh)",
+                proc.stdout,
+            )
+            self.assertNotIn("No Windows footguns found", proc.stdout)
+
+    def test_missing_path_counts_as_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run_script(["gone.py"], Path(tmp))
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("NOT-APPLICABLE: 0 python file(s) in scope (1 skipped:", proc.stdout)
+
+    def test_mixed_list_is_scanned_normally(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.js").write_text("x\n", encoding="utf-8")
+            (root / "ok.py").write_text("x = 1\n", encoding="utf-8")
+            proc = run_script(["a.js", "ok.py"], root)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertNotIn("NOT-APPLICABLE", proc.stdout)
+            self.assertEqual(scanned_count(proc), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
