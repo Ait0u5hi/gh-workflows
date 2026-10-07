@@ -156,6 +156,15 @@ class Footgun:
     post_filter: "callable | None" = None
 
 
+_PSEUDO_FILE_ARG = re.compile(r"""^[rRfF]{0,2}['"]/(?:proc|sys)/""")
+
+
+def _is_pseudo_file_arg(arg: str) -> bool:
+    """True if the first open() argument is a str/f-string literal naming a
+    Linux-only pseudo-file under /proc/ or /sys/."""
+    return bool(_PSEUDO_FILE_ARG.match(arg.strip()))
+
+
 FOOTGUNS: list[Footgun] = [
     Footgun(
         name="open() without encoding= on text mode",
@@ -169,7 +178,7 @@ FOOTGUNS: list[Footgun] = [
         # explicit builtins-style open() call.  Path.open() is rare in the
         # codebase compared to open() and can be audited separately.
         pattern=re.compile(
-            r"""(?:^|[\s\(,;=])(?<![.\w])open\s*\(\s*[^,)]+\s*(?:,\s*['"](?P<mode>[^'"]*)['"])?"""
+            r"""(?:^|[\s\(,;=])(?<![.\w])open\s*\(\s*(?P<arg>[^,)]+)\s*(?:,\s*['"](?P<mode>[^'"]*)['"])?"""
         ),
         message=(
             "open() without an explicit encoding= uses the platform default "
@@ -194,6 +203,9 @@ FOOTGUNS: list[Footgun] = [
             # Too expensive to trace; require the author to set encoding in
             # the dict and trust them (or they can add a # windows-footgun: ok).
             and "**" not in line
+            # Skip literal Linux pseudo-files (/proc/..., /sys/...): they
+            # exist only on Linux and are always ASCII, so encoding is moot.
+            and not _is_pseudo_file_arg(m.group("arg"))
         ),
     ),
     Footgun(
@@ -547,7 +559,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument(
         "--all",
         action="store_true",
-        help="Scan the full repository (hermes_cli/, gateway/, tools/, cron/, etc.).",
+        help=("Scan the full repository: the hermes-agent package dirs inside a "
+              "hermes-agent checkout, otherwise the git toplevel of the current directory."),
     )
     p.add_argument(
         "--diff",
@@ -571,6 +584,51 @@ def print_rules() -> None:
         print()
 
 
+HERMES_ROOT_NAMES = (
+    "hermes_cli",
+    "gateway",
+    "tools",
+    "cron",
+    "agent",
+    "plugins",
+    "scripts",
+    "acp_adapter",
+    "acp_registry",
+)
+# Roots that identify a hermes-agent checkout. "scripts", "tools", "plugins",
+# "agent" and "cron" are generic names that exist in many repos, so they do
+# not count as evidence on their own.
+HERMES_MARKER_NAMES = ("hermes_cli", "gateway", "acp_adapter", "acp_registry")
+
+
+def git_toplevel(cwd: Path) -> Path:
+    """Git toplevel of cwd, or cwd itself when not inside a git work tree."""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return cwd
+    return Path(out) if out else cwd
+
+
+def default_all_roots() -> list[Path]:
+    """Roots for --all.
+
+    Inside a hermes-agent checkout: its known package directories. Anywhere
+    else those directories are absent, so scan the git toplevel of the current
+    working directory with the same walker used for explicit paths.
+    """
+    if any((REPO_ROOT / n).exists() for n in HERMES_MARKER_NAMES):
+        return [r for r in (REPO_ROOT / n for n in HERMES_ROOT_NAMES) if r.exists()]
+    return [git_toplevel(Path.cwd()).resolve()]
+
+
 def main(argv: list[str]) -> int:
     # Windows terminals default to cp1252, which can't encode the ✓/✗
     # characters used in the output. Reconfigure streams to UTF-8 so the
@@ -587,19 +645,7 @@ def main(argv: list[str]) -> int:
         return 0
 
     if args.all:
-        # Scan main Python packages + scripts
-        roots = [
-            REPO_ROOT / "hermes_cli",
-            REPO_ROOT / "gateway",
-            REPO_ROOT / "tools",
-            REPO_ROOT / "cron",
-            REPO_ROOT / "agent",
-            REPO_ROOT / "plugins",
-            REPO_ROOT / "scripts",
-            REPO_ROOT / "acp_adapter",
-            REPO_ROOT / "acp_registry",
-        ]
-        roots = [r for r in roots if r.exists()]
+        roots = default_all_roots()
     elif args.diff:
         roots = get_diff_files(args.diff)
     elif args.paths:
