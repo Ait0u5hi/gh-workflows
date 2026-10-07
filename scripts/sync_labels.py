@@ -7,6 +7,15 @@ it would create or update, and calls nothing that changes a repo.
 Idempotent: a label whose color and description already match is left alone,
 so a second --apply run makes no calls beyond the listing.
 
+Label names are case-insensitive on GitHub, so existing labels are matched on
+the casefolded name. When the only match differs in case ('Type:Bug' held,
+'type:bug' in the taxonomy) the action is 'case-mismatch': it is printed (dry
+run and --apply alike) and nothing is created, renamed or edited, because
+'gh label create --force' would case-rename the existing label. Its color and
+description are not synced either; fix the name by hand, then re-run. Two
+existing labels differing only by case with no exact match are reported the
+same way. An exact-case match behaves as before (update on drift).
+
 It never deletes or renames a label. Repo-specific labels (harness-improvement
 on one private consumer repo, daily-summary on another) are outside the taxonomy and stay.
 
@@ -67,16 +76,25 @@ def current_labels(repo):
 
 
 def plan(taxonomy, existing):
-    """(action, label) pairs: 'create' when absent, 'update' when color or
-    description differ. Matching is exact on the name."""
+    """(action, label, detail) triples. 'create' when no label matches even
+    case-insensitively, 'update' when the exact-case match differs in color or
+    description, 'case-mismatch' (detail = the existing name(s)) when the only
+    matches differ in case. detail is '' for create/update."""
+    folded = {}
+    for name in existing:
+        folded.setdefault(name.casefold(), []).append(name)
     actions = []
     for lab in taxonomy:
         have = existing.get(lab["name"])
         if have is None:
-            actions.append(("create", lab))
+            near = folded.get(lab["name"].casefold())
+            if near:
+                actions.append(("case-mismatch", lab, ", ".join(sorted(near))))
+            else:
+                actions.append(("create", lab, ""))
         elif (have.get("color", "").lower() != lab["color"]
               or (have.get("description") or "") != lab["description"]):
-            actions.append(("update", lab))
+            actions.append(("update", lab, ""))
     return actions
 
 
@@ -85,7 +103,11 @@ def sync_repo(repo, taxonomy, apply):
     if not actions:
         print(f"{repo}: up to date")
         return
-    for action, lab in actions:
+    for action, lab, detail in actions:
+        if action == "case-mismatch":
+            print(f"{repo}: case-mismatch {lab['name']} (repo has {detail}); "
+                  "left untouched, rename by hand")
+            continue
         verb = action if apply else f"would {action}"
         print(f"{repo}: {verb} {lab['name']}")
         if apply:
