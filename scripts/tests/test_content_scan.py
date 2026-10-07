@@ -54,22 +54,6 @@ def pcre2_rg_or_skip(test):
     return rg
 
 
-def _host_rg_has_pcre2():
-    """True only if the `rg` on PATH was built with PCRE2 support.
-
-    CI runners ship a PCRE2-capable rg; a host whose rg lacks it (e.g. a
-    distro package) has `rg --pcre2-version` exit non-zero ("PCRE2 is not
-    available in this build of ripgrep") instead of 0.
-    """
-    rg = shutil.which("rg")
-    if rg is None:
-        return False
-    return subprocess.run([rg, "--pcre2-version"], capture_output=True).returncode == 0
-
-
-_HOST_RG_HAS_PCRE2 = _host_rg_has_pcre2()
-
-
 class Tree:
     """A throwaway directory scanned by the script."""
 
@@ -238,7 +222,6 @@ class TestPcre2(unittest.TestCase):
                       rg_bin=resolve_rg())
             self.assertNotEqual(r.returncode, 1, "expected an rg error, not a clean 'no match'")
 
-    @unittest.skipUnless(_HOST_RG_HAS_PCRE2, "host ripgrep built without PCRE2")
     def test_lookaround_pattern_with_pcre2_matches_only_the_unguarded_path(self):
         rg = pcre2_rg_or_skip(self)
         with Tree(**{
@@ -291,7 +274,6 @@ class TestRgBin(unittest.TestCase):
                       path=self.path)
             self.assertNotEqual(r.returncode, 1, "expected an rg error from the PCRE2-incapable stub")
 
-    @unittest.skipUnless(_HOST_RG_HAS_PCRE2, "host ripgrep built without PCRE2")
     def test_rg_bin_overrides_path_order(self):
         rg = pcre2_rg_or_skip(self)
         with Tree(**{
