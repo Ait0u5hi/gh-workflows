@@ -21,7 +21,7 @@
 # Why jobs: the runner pulls every docker action image in a job during job setup,
 # BEFORE step `if:` conditions are evaluated. A step-level switch therefore still
 # fails with "docker: command not found" on a docker-less runner (measured
-# 2026-09-13, ml-development-and-engineering PR #214). A job skipped by a
+# 2026-09-13, a private consumer repo's PR #214). A job skipped by a
 # job-level `if:` never reaches a runner, so nothing is pulled.
 #
 # Caller stub must grant: contents: read, security-events: write, actions: read.

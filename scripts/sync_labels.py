@@ -8,7 +8,7 @@ Idempotent: a label whose color and description already match is left alone,
 so a second --apply run makes no calls beyond the listing.
 
 It never deletes or renames a label. Repo-specific labels (harness-improvement
-on fleet-harness, daily-summary on ml-dev) are outside the taxonomy and stay.
+on one private consumer repo, daily-summary on another) are outside the taxonomy and stay.
 
 Repos are arguments, not a list kept here: which repos exist is fleet
 knowledge, not org-CI law.
