@@ -165,6 +165,91 @@ def _is_pseudo_file_arg(arg: str) -> bool:
     return bool(_PSEUDO_FILE_ARG.match(arg.strip()))
 
 
+def _split_call_args(line: str, start: int) -> list[str]:
+    """Top-level comma-separated arguments of the call whose argument list
+    begins at ``line[start]`` (just after the opening paren).
+
+    Balanced-paren scan that honours quotes, so a nested call such as
+    ``p.with_suffix(".lock")`` or ``os.path.join(a, b)`` does not end the
+    argument early. Stops at the call's closing paren, or at end of line for a
+    call that continues on the next line.
+    """
+    args: list[str] = []
+    depth = 0
+    quote: str | None = None
+    cur: list[str] = []
+    i = start
+    n = len(line)
+    while i < n:
+        c = line[i]
+        if quote:
+            cur.append(c)
+            if c == "\\" and i + 1 < n:
+                cur.append(line[i + 1])
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+        elif c in "'\"":
+            quote = c
+            cur.append(c)
+        elif c in "([{":
+            depth += 1
+            cur.append(c)
+        elif c in ")]}":
+            if depth == 0:
+                break
+            depth -= 1
+            cur.append(c)
+        elif c == "," and depth == 0:
+            args.append("".join(cur).strip())
+            cur = []
+        else:
+            cur.append(c)
+        i += 1
+    tail = "".join(cur).strip()
+    if tail or args:
+        args.append(tail)
+    return args
+
+
+_STR_LITERAL = re.compile(r"""^[rRbBuUfF]{0,2}(['"])(?P<body>.*)\1$""")
+
+
+def _open_call_parts(m: re.Match, line: str) -> tuple[str, str | None]:
+    """(first argument, literal mode or None) of the open() call matched by m."""
+    args = _split_call_args(line, m.end("head"))
+    first = args[0] if args else ""
+    mode_arg = None
+    if len(args) > 1 and not re.match(r"^\w+\s*=(?!=)", args[1]):
+        mode_arg = args[1]
+    for a in args[1:]:
+        kw = re.match(r"^mode\s*=(?!=)\s*(.*)$", a)
+        if kw:
+            mode_arg = kw.group(1)
+    lit = _STR_LITERAL.match(mode_arg.strip()) if mode_arg else None
+    return first, (lit.group("body") if lit else None)
+
+
+def _open_is_text_footgun(m: re.Match, line: str) -> bool:
+    first, mode = _open_call_parts(m, line)
+    return (
+        "b" not in (mode or "")
+        and "encoding=" not in line
+        and "encoding =" not in line
+        # Skip `def open(` and `async def open(` (method definitions)
+        and not line.lstrip().startswith("def ")
+        and not line.lstrip().startswith("async def ")
+        # Skip open(path, **kwargs) patterns — encoding may be in the dict.
+        # Too expensive to trace; require the author to set encoding in
+        # the dict and trust them (or they can add a # windows-footgun: ok).
+        and "**" not in line
+        # Skip literal Linux pseudo-files (/proc/..., /sys/...): they
+        # exist only on Linux and are always ASCII, so encoding is moot.
+        and not _is_pseudo_file_arg(first)
+    )
+
+
 FOOTGUNS: list[Footgun] = [
     Footgun(
         name="open() without encoding= on text mode",
@@ -178,7 +263,7 @@ FOOTGUNS: list[Footgun] = [
         # explicit builtins-style open() call.  Path.open() is rare in the
         # codebase compared to open() and can be audited separately.
         pattern=re.compile(
-            r"""(?:^|[\s\(,;=])(?<![.\w])open\s*\(\s*(?P<arg>[^,)]+)\s*(?:,\s*['"](?P<mode>[^'"]*)['"])?"""
+            r"""(?:^|[\s\(,;=])(?<![.\w])(?P<head>open\s*\()"""
         ),
         message=(
             "open() without an explicit encoding= uses the platform default "
@@ -191,22 +276,10 @@ FOOTGUNS: list[Footgun] = [
             "file may have a BOM"
         ),
         # Filter: only flag if mode is missing-or-text AND the line doesn't
-        # already pass encoding=. Skip binary mode (contains "b").
-        post_filter=lambda m, line: (
-            "b" not in (m.group("mode") or "")
-            and "encoding=" not in line
-            and "encoding =" not in line
-            # Skip `def open(` and `async def open(` (method definitions)
-            and not line.lstrip().startswith("def ")
-            and not line.lstrip().startswith("async def ")
-            # Skip open(path, **kwargs) patterns — encoding may be in the dict.
-            # Too expensive to trace; require the author to set encoding in
-            # the dict and trust them (or they can add a # windows-footgun: ok).
-            and "**" not in line
-            # Skip literal Linux pseudo-files (/proc/..., /sys/...): they
-            # exist only on Linux and are always ASCII, so encoding is moot.
-            and not _is_pseudo_file_arg(m.group("arg"))
-        ),
+        # already pass encoding=. The mode comes from a balanced-paren scan of
+        # the call's arguments (see _open_is_text_footgun), so a nested call
+        # in the first argument cannot hide a binary mode.
+        post_filter=_open_is_text_footgun,
     ),
     Footgun(
         name="os.kill(pid, 0)",

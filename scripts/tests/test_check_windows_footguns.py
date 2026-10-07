@@ -67,6 +67,29 @@ class PseudoFileOpenTests(unittest.TestCase):
         proc = self.scan("x = OPEN(path)\n")
         self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
 
+    def test_binary_mode_with_nested_call_path_not_flagged(self):
+        for mode in ("ab", "rb", "wb"):
+            proc = self.scan(f'x = OPEN(p.with_suffix(".lock"), "{mode}")\n')
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_binary_mode_keyword_not_flagged(self):
+        proc = self.scan('x = OPEN(str(p), mode="rb")\n')
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_binary_mode_with_comma_in_nested_call_not_flagged(self):
+        proc = self.scan('x = OPEN(os.path.join(a, b), "wb")\n')
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_text_mode_with_nested_call_path_still_flagged(self):
+        proc = self.scan('x = OPEN(p.with_suffix(".x"))\n')
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        proc = self.scan('x = OPEN(p.with_suffix(".x"), "w")\n')
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+
+    def test_nested_call_with_encoding_not_flagged(self):
+        proc = self.scan('x = OPEN(p.with_suffix(".x"), "w", encoding="utf-8")\n')
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
 
 class AllScopeTests(unittest.TestCase):
     def make_repo(self, root: Path) -> None:
