@@ -44,3 +44,48 @@ jobs:
         run: |
           pip install --quiet zizmor==1.26.1
           zizmor --no-online-audits .github/workflows/
+
+  unit-tests:
+    name: unit-tests (scripts/tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      # ubuntu-latest ships no ripgrep, and the content-scan tests run rg from a
+      # pinned PATH (/usr/bin:/bin:/usr/local/bin). Install the same pinned,
+      # SHA-256-verified, PCRE2-capable release actions/content-scan uses (keep
+      # RG_VERSION and the hash in step with actions/content-scan/action.yml).
+      - name: Install ripgrep (pinned + SHA-256 verified)
+        env:
+          RG_VERSION: "14.1.1"
+          RG_SHA256_AMD64: 4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e # x86_64-unknown-linux-musl
+        run: |
+          set -euo pipefail
+          tarball="ripgrep-${RG_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl -sSfL -o "$RUNNER_TEMP/$tarball" "https://github.com/BurntSushi/ripgrep/releases/download/${RG_VERSION}/${tarball}"
+          (cd "$RUNNER_TEMP" && echo "${RG_SHA256_AMD64}  ${tarball}" | sha256sum -c - \
+            && tar -xzf "$tarball" --strip-components=1 "ripgrep-${RG_VERSION}-x86_64-unknown-linux-musl/rg")
+          sudo install -m 0755 "$RUNNER_TEMP/rg" /usr/local/bin/rg
+          /usr/local/bin/rg --pcre2-version
+      # test_sync_labels and test_pr_title_pattern read YAML; setup-python's
+      # interpreter has no PyYAML.
+      - name: Install PyYAML (pinned)
+        run: pip install --quiet pyyaml==6.0.3
+      # Every test must run: a skip here means a prerequisite went missing.
+      - name: unittest (scripts/tests)
+        env:
+          RG_BIN: /usr/local/bin/rg
+        run: |
+          set -o pipefail
+          python3 -m unittest discover -s scripts/tests -t scripts/tests -v 2>&1 | tee "$RUNNER_TEMP/unittest.log"
+          if grep -q 'skipped=' "$RUNNER_TEMP/unittest.log"; then
+            echo "::error::a scripts/tests test was skipped; every test must run in CI"
+            exit 1
+          fi
