@@ -7,6 +7,16 @@ tags callers pin (`@v1`). See [README → Versioning](README.md#versioning).
 ## [Unreleased]
 
 ### Fixed
+- `actions/windows-footguns`: the diff step now builds its file list
+  NUL-delimited into a bash array (a path with a space used to get
+  word-split by `tr '\n' ' '` into two bogus argv entries) and with
+  `git diff -M --diff-filter=d`, which excludes only Deleted paths while
+  keeping Renamed/Copied ones — the previous unfiltered `git diff` passed
+  a deleted path's now-gone name straight to the checker. The step's own
+  exit code is always exactly the checker's exit code; it never greps the
+  checker's stdout (e.g. for its "NOT-APPLICABLE" line) to decide pass/fail,
+  since that text can also appear in a genuinely-failing run (a matched
+  source line, or a file literally named `NOT-APPLICABLE.py`).
 - `scripts/sync_labels.py`: a case-mismatch used to exit 0 with no summary, so a
   scheduled `--apply` run could never notice it. It now prints a stderr footer
   ("N label(s) need a manual case rename") and exits with a new, distinct code

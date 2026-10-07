@@ -22,16 +22,56 @@ runs:
       env:
         BASE_REF: ${{ inputs.base-ref }}
       run: |
+        set -euo pipefail
         SCRIPT="${GITHUB_ACTION_PATH}/../../scripts/check-windows-footguns.py"
         BASE=$(git merge-base "origin/${BASE_REF}" HEAD 2>/dev/null || true)
+
+        # NUL-delimited into a bash array, never `tr '\n' ' '` + unquoted
+        # word-split: a changed path containing a space (or any byte but
+        # NUL) must survive as a single argv element to the checker.
+        #
+        # --diff-filter=d excludes Deleted paths only — there is nothing on
+        # disk left to scan for one, and passing it through used to make the
+        # checker count it as a no-op "skipped" path for no reason. It
+        # deliberately does NOT use an allow-list like --diff-filter=AM:
+        # that would also exclude Renamed/Copied paths, silently stopping
+        # the scan of a file that was renamed with edits. -M turns an
+        # unmodified rename's delete+add pair into a single R entry (so the
+        # d-filter has nothing to drop); -C (copy detection) is not enabled
+        # — it's expensive, and a copy still shows up as a plain Added path
+        # here, which is still scanned correctly.
+        FILES=()
         if [ -n "$BASE" ]; then
-          FILES=$(git diff --name-only "${BASE}..HEAD" -- '*.py' | tr '\n' ' ')
+          while IFS= read -r -d '' f; do
+            FILES+=("$f")
+          done < <(git diff -z -M --diff-filter=d --name-only "${BASE}..HEAD" -- '*.py')
         else
-          FILES=$(git ls-files '*.py' | tr '\n' ' ')
+          while IFS= read -r -d '' f; do
+            FILES+=("$f")
+          done < <(git ls-files -z -- '*.py')
         fi
-        if [ -z "${FILES// }" ]; then
-          echo "No Python files to scan."; exit 0
+
+        if [ "${#FILES[@]}" -eq 0 ]; then
+          echo "No Python files to scan."
+          exit 0
         fi
-        echo "Scanning: $FILES"
-        # shellcheck disable=SC2086  # intentional word-split: pass files as separate args
-        python3 "$SCRIPT" $FILES
+        printf 'Scanning:\n'
+        printf '  %s\n' "${FILES[@]}"
+
+        # This step's result is ALWAYS exactly the checker's exit code — we
+        # never grep its stdout (e.g. for the checker's own "NOT-APPLICABLE"
+        # line) to decide pass/fail. The checker scans attacker-influenced
+        # source: a file literally named NOT-APPLICABLE.py, or a matched
+        # source line that happens to contain that text, would let crafted
+        # content turn a real footgun finding (exit 1) into a false
+        # "neutral" if we keyed off text instead of the exit code. The
+        # checker's NOT-APPLICABLE line (printed to stdout above when it
+        # applies — e.g. every changed .py file turned out to be excluded)
+        # is informational for a human reading the log; it changes nothing
+        # here, because it already shares exit 0 with a clean pass in the
+        # checker's own contract (see its docstring).
+        set +e
+        python3 "$SCRIPT" "${FILES[@]}"
+        rc=$?
+        set -e
+        exit "$rc"
