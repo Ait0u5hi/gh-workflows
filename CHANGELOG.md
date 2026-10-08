@@ -24,6 +24,34 @@ tags callers pin (`@v1`). See [README → Versioning](README.md#versioning).
   "exec format error" well into the job, or (worse, if ripgrep happened to
   run under emulation) silently never exercise the pinned binary the tests
   assume.
+- `actions/windows-footguns` further hardening of the same diff step: a
+  changed file literally named e.g. `--diff=HEAD.py` (or its unambiguous
+  abbreviation `--dif=x.py`) used to be consumed by the checker's own
+  argparse as the `--diff` option instead of reaching the file list,
+  silently replacing the whole scan and hiding a real footgun in another
+  changed file — a `--` separator now makes every token after it
+  positional. The file list is also built via a plain temp file, never
+  `while read ... < <(git diff ...)` process substitution: that ran the
+  git command in a subshell whose exit status `set -e` never observed, so
+  a failing `git diff`/`git ls-files` (not a git repo, a corrupted
+  checkout) was silently read as an empty diff instead of failing the
+  step. That temp directory is now removed by a `trap ... EXIT`, not only
+  by an `rm -rf` reached solely on the success path, so it's no longer
+  leaked on that same failure path; the trap doesn't call `exit` itself,
+  so it never changes the step's own exit code. When the merge-base
+  lookup itself fails (a shallow or unrelated-history base ref) and the
+  step falls back to scanning every tracked `.py` file, it now prints a
+  fixed-string `::notice::` saying so — never the base-ref or a filename,
+  since either is caller-influenced and an `::...::` line is a GitHub
+  Actions workflow command an attacker-shaped value could otherwise forge
+  a second one inside.
+- `scripts/check-windows-footguns.py`: `--diff <ref>` with a ref that doesn't
+  resolve to a commit (a typo, a renamed or never-fetched base branch) used
+  to be indistinguishable from a ref that resolves cleanly but has zero
+  changed `.py` files — both silently reported `NOT-APPLICABLE`/exit 0. An
+  unresolvable ref now exits 2 with a stderr message instead; a resolvable
+  ref with nothing changed still gets the documented `NOT-APPLICABLE`/exit 0
+  (the lookup worked, there's just nothing to report).
 - `scripts/sync_labels.py`: a case-mismatch used to exit 0 with no summary, so a
   scheduled `--apply` run could never notice it. It now prints a stderr footer
   ("N label(s) need a manual case rename") and exits with a new, distinct code
