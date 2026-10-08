@@ -320,6 +320,53 @@ class WindowsFootgunsActionScript(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertEqual(self._stub_argv(), ["tracked.py"])
 
+    # -- F-C: a ::notice:: on the merge-base-fails fallback -----------------
+
+    NOTICE_PREFIX = "::notice::windows-footguns: "
+
+    def test_no_merge_base_emits_a_notice_of_the_fallback(self):
+        """A human reading the job log should see that the scan silently
+        widened to every tracked .py file, not just a shorter FILES list
+        with no explanation."""
+        self._write("tracked.py", "x = 1\n")
+        self._base()
+        proc = self._run(base_ref="does-not-exist", stub_exit="0")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn(self.NOTICE_PREFIX, proc.stdout)
+
+    def test_notice_is_a_fixed_string_not_shaped_by_base_ref(self):
+        """base-ref is a workflow `inputs:` value (caller-controlled). A
+        base-ref containing its own `::` (or worse, an embedded newline)
+        must not let a second, forged workflow command ride along inside
+        this notice line — so the notice text is a fixed string with no
+        base-ref or filename interpolated into it at all. Assert the exact
+        fixed line appears, and that the attacker-chosen ref text itself
+        never does."""
+        self._write("tracked.py", "x = 1\n")
+        self._base()
+        poison_ref = "evil::error::pwned"
+        proc = self._run(base_ref=poison_ref, stub_exit="0")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn(
+            self.NOTICE_PREFIX
+            + "merge-base not found against the base ref; "
+            "scanning every tracked .py file",
+            proc.stdout,
+        )
+        self.assertNotIn("pwned", proc.stdout)
+        self.assertNotIn("evil", proc.stdout)
+
+    def test_resolvable_merge_base_emits_no_notice(self):
+        """The fallback notice is specific to the no-merge-base case — a
+        normal diff against a real base must not print it."""
+        self._write("a.py", "x = 1\n")
+        self._base()
+        self._write("a.py", "x = 2\n")
+        self._head()
+        proc = self._run(stub_exit="0")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertNotIn("::notice::", proc.stdout)
+
 
 REAL_CHECKER = (REPO_ROOT / "scripts" / "check-windows-footguns.py").read_text(encoding="utf-8")
 

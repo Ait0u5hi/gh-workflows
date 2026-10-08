@@ -26,6 +26,18 @@ runs:
         SCRIPT="${GITHUB_ACTION_PATH}/../../scripts/check-windows-footguns.py"
         BASE=$(git merge-base "origin/${BASE_REF}" HEAD 2>/dev/null || true)
 
+        # A fixed string only — never the base-ref (a workflow `inputs:`
+        # value, so caller-controlled) or any filename. GitHub Actions reads
+        # an `::...::` line as a workflow command: a base-ref or path
+        # containing its own `::` (or a crafted newline) could otherwise
+        # forge a second command — e.g. close off this notice early and
+        # open an `::error::` or `::add-mask::` of its own. A fixed string
+        # has nothing in it for an attacker to shape, so this is the
+        # notice's entire content.
+        if [ -z "$BASE" ]; then
+          echo "::notice::windows-footguns: merge-base not found against the base ref; scanning every tracked .py file"
+        fi
+
         # NUL-delimited into a bash array, never `tr '\n' ' '` + unquoted
         # word-split: a changed path containing a space (or any byte but
         # NUL) must survive as a single argv element to the checker.
