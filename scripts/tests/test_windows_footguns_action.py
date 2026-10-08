@@ -43,6 +43,7 @@ any squash merge that drops 709fabb from history.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import stat
 import subprocess
@@ -672,6 +673,181 @@ class TempDirTrapTests(unittest.TestCase):
         proc = self._run()
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self._assert_scratch_empty()
+
+
+# N2 / ATTACK SURFACE (c), (d): a changed file whose name starts with `::`
+# reaches the log at column 0 through the checker's own finding lines
+# (check-windows-footguns.py prints "{rel}:{lineno}: ..." per match), which
+# GitHub Actions would otherwise read as a forged workflow command (e.g.
+# `::add-mask::` or `::error::`). The step now disables command processing
+# with `::stop-commands::<TOKEN>` before the checker runs and re-enables it
+# with `::<TOKEN>::` in the EXIT trap, on every exit path.
+STOP_COMMANDS_OPEN_RE = re.compile(r"^::stop-commands::([0-9a-f]+)$", re.MULTILINE)
+
+
+class StopCommandsWindowTests(unittest.TestCase):
+    """N2: the stop-commands/resume bracket around the checker call."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.gh_workflows_root = self.tmp / "gh-workflows-checkout"
+        self.action_path = self.gh_workflows_root / "actions" / "windows-footguns"
+        self.action_path.mkdir(parents=True)
+        self.checker_file = self.gh_workflows_root / "scripts" / "check-windows-footguns.py"
+        self.checker_file.parent.mkdir(parents=True)
+        self.checker_file.write_text(REAL_CHECKER, encoding="utf-8")
+        self.repo = self.tmp / "consumer-repo"
+        self.repo.mkdir()
+        _git(["init", "-q", str(self.repo)], cwd=self.tmp)
+        self.mktemp_scratch = self.tmp / "mktemp-scratch"
+        self.mktemp_scratch.mkdir()
+
+    def _base(self, message="base"):
+        sha = _commit(self.repo, message)
+        _git(["update-ref", "refs/remotes/origin/main", sha], cwd=self.repo)
+        return sha
+
+    def _head(self, message="head"):
+        return _commit(self.repo, message)
+
+    def _write(self, rel, content=""):
+        p = self.repo / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+        return p
+
+    def _run(self, base_ref="main", cwd=None, action_path=None):
+        env = {
+            "PATH": "/usr/bin:/bin",
+            "BASE_REF": base_ref,
+            "GITHUB_ACTION_PATH": str(action_path or self.action_path),
+            "TMPDIR": str(self.mktemp_scratch),
+        }
+        return subprocess.run(
+            ["bash", "-c", _run_step_script()], cwd=cwd or self.repo, env=env,
+            capture_output=True, text=True, timeout=30,
+        )
+
+    def _token(self, stdout):
+        m = STOP_COMMANDS_OPEN_RE.search(stdout)
+        self.assertIsNotNone(m, f"no ::stop-commands::<token> line in: {stdout!r}")
+        return m.group(1)
+
+    # -- (c): bracket + literal-not-a-command + exit codes -------------
+
+    def test_footgun_filename_prints_literally_between_the_brackets(self):
+        """A changed file named '::add-mask::x.py', planted with a real
+        footgun, must have its checker finding line appear LITERALLY in
+        the log, strictly between the stop-commands line and the matching
+        resume line, never outside that window."""
+        poison_name = "::add-mask::x.py"
+        self._write(poison_name, "x = 1\n")
+        self._base()
+        self._write(poison_name, FOOTGUN_LINE)
+        self._head("introduce a footgun in a workflow-command-shaped filename")
+        proc = self._run()
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        token = self._token(proc.stdout)
+        open_line = f"::stop-commands::{token}"
+        close_line = f"::{token}::"
+        open_idx = proc.stdout.index(open_line)
+        close_idx = proc.stdout.index(close_line)
+        poison_idx = proc.stdout.index(poison_name)
+        self.assertGreater(poison_idx, open_idx, "poison filename printed before the window opened")
+        self.assertLess(poison_idx, close_idx, "poison filename printed after the window closed")
+        # It appears as literal text, not as a workflow command: the
+        # exact "::add-mask::x.py" substring is present verbatim.
+        self.assertIn(poison_name, proc.stdout)
+
+    def _assert_scratch_empty(self):
+        self.assertEqual(
+            list(self.mktemp_scratch.iterdir()), [],
+            "FILE_LIST_DIR leaked under TMPDIR after the step exited",
+        )
+
+    def test_resume_line_appears_on_footgun_exit(self):
+        self._write("bad.py", "x = 1\n")
+        self._base()
+        self._write("bad.py", FOOTGUN_LINE)
+        self._head("introduce a footgun")
+        proc = self._run()
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        token = self._token(proc.stdout)
+        self.assertIn(f"::{token}::", proc.stdout)
+        self._assert_scratch_empty()
+
+    def test_resume_line_appears_on_clean_exit(self):
+        self._write("a.py", "x = 1\n")
+        self._base()
+        self._write("a.py", 'x = open("data.txt", encoding="utf-8")\n')
+        self._head("clean change")
+        proc = self._run()
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        token = self._token(proc.stdout)
+        self.assertIn(f"::{token}::", proc.stdout)
+        self._assert_scratch_empty()
+
+    def test_resume_line_appears_when_the_checker_is_missing(self):
+        """rc 2: $SCRIPT itself does not exist (python3's own "can't open
+        file" exit code). The resume line must still fire."""
+        self._write("a.py", "x = 1\n")
+        self._base()
+        self._write("a.py", "x = 2\n")
+        self._head("any change, so FILES is non-empty")
+        self.checker_file.unlink()
+        proc = self._run()
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        token = self._token(proc.stdout)
+        self.assertIn(f"::{token}::", proc.stdout)
+        self._assert_scratch_empty()
+
+    def test_resume_line_appears_on_non_git_failure(self):
+        """rc 128: a `set -e` abort from `git ls-files`/`git diff` failing
+        outside a git repository. The resume line must still fire even
+        though the checker never ran."""
+        non_git_dir = self.tmp / "not-a-repo"
+        non_git_dir.mkdir()
+        proc = self._run(cwd=non_git_dir)
+        self.assertEqual(proc.returncode, 128, proc.stdout + proc.stderr)
+        token = self._token(proc.stdout)
+        self.assertIn(f"::{token}::", proc.stdout)
+        self._assert_scratch_empty()
+
+    # -- (d): the fixed ::notice:: stays outside the window ------------
+
+    def test_notice_stays_outside_the_stop_commands_window(self):
+        self._write("tracked.py", "x = 1\n")
+        self._base()
+        proc = self._run(base_ref="does-not-exist")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        notice_idx = proc.stdout.index("::notice::")
+        open_idx = proc.stdout.index("::stop-commands::")
+        self.assertLess(
+            notice_idx, open_idx,
+            "the fixed ::notice:: must be emitted BEFORE the stop-commands "
+            "window opens, so it is still processed as a real command",
+        )
+
+    # -- the TOKEN itself is unpredictable, not run-id/pid/date ---------
+
+    def test_token_is_hex_and_differs_across_runs(self):
+        """Not a strong cryptographic proof, but rules out the obviously
+        predictable sources named in the brief: two runs under the same
+        PID-adjacent process tree and the same wall-clock second must not
+        produce the same token, and the token is not simply $$ or a
+        timestamp formatted as decimal digits."""
+        self._write("a.py", "x = 1\n")
+        self._base()
+        self._write("a.py", "x = 2\n")
+        self._head("clean")
+        proc1 = self._run()
+        proc2 = self._run()
+        token1 = self._token(proc1.stdout)
+        token2 = self._token(proc2.stdout)
+        self.assertRegex(token1, r"^[0-9a-f]{32}$")
+        self.assertRegex(token2, r"^[0-9a-f]{32}$")
+        self.assertNotEqual(token1, token2)
 
 
 if __name__ == "__main__":
