@@ -56,7 +56,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 ACTION_YML = REPO_ROOT / "actions" / "windows-footguns" / "action.yml"
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 OLD_ACTION_YML = FIXTURES_DIR / "action_709fabb.yml"
-OLD_CHECKER_PATH = FIXTURES_DIR / "check_windows_footguns_709fabb.py"
+# .py.txt, not .py: this vendored fixture must never be a Python file
+# itself (see test_check_windows_footguns.py's FixtureNotPythonTests) so
+# that no checker version - including one pinned at an old tag that
+# predates any exclusion fix in this repo's HEAD - ever scans it.
+OLD_CHECKER_PATH = FIXTURES_DIR / "check_windows_footguns_709fabb.py.txt"
 
 STUB_CHECKER = """#!/usr/bin/env python3
 import json, os, sys
@@ -379,14 +383,21 @@ REAL_CHECKER = (REPO_ROOT / "scripts" / "check-windows-footguns.py").read_text(e
 # a real improvement, but a different signal — so reproducing the original
 # evidence needs the original checker, not today's doubly-patched one.
 #
-# Read from a vendored fixture (scripts/tests/fixtures/check_windows_footguns_709fabb.py),
-# never `git show 709fabb:...` at import time — see _old_run_step_script's
+# Read from a vendored fixture
+# (scripts/tests/fixtures/check_windows_footguns_709fabb.py.txt), never
+# `git show 709fabb:...` at import time — see _old_run_step_script's
 # docstring for why a live git-history read breaks a depth-1 CI checkout.
 OLD_CHECKER = OLD_CHECKER_PATH.read_text(encoding="utf-8")
 
 # A real, unsuppressed footgun (no `# windows-footgun: ok`, no encoding=):
-# open() without an explicit encoding= on a text-mode call.
-FOOTGUN_LINE = 'x = open("data.txt")\n'
+# open() without an explicit encoding= on a text-mode call. The VALUE of
+# this string is what gets planted into the fixture repos below and must
+# stay unsuppressed there (that's the whole point: it's the thing the
+# checker is supposed to catch). The trailing marker on THIS assignment
+# line is a different thing: it only keeps this file's own self-scan
+# (scripts/tests/test_check_windows_footguns.py's SelfLintTests) from
+# flagging the literal source line that defines the constant.
+FOOTGUN_LINE = 'x = open("data.txt")\n'  # windows-footgun: ok
 
 
 class WindowsFootgunsActionRealCheckerTests(unittest.TestCase):
