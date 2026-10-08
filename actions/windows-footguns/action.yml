@@ -70,8 +70,21 @@ runs:
         # is informational for a human reading the log; it changes nothing
         # here, because it already shares exit 0 with a clean pass in the
         # checker's own contract (see its docstring).
+        #
+        # `--` before the file list is load-bearing, not decorative: the
+        # checker's argparse defines --all/--diff/--list, and without a
+        # `--` boundary a changed file literally named e.g. `--diff=HEAD.py`
+        # (or its unambiguous abbreviation `--dif=x.py`) is consumed as the
+        # --diff option instead of reaching `paths`. That silently replaces
+        # the whole file list with get_diff_files("HEAD.py") — usually an
+        # unresolvable ref, which used to report NOT-APPLICABLE/exit 0 and
+        # hide a real footgun in another changed file. `--` makes every
+        # token after it positional, even one that is itself the literal
+        # string `--` (argparse only treats the FIRST `--` as the
+        # separator), so an option-shaped filename always reaches the
+        # checker as a path to scan.
         set +e
-        python3 "$SCRIPT" "${FILES[@]}"
+        python3 "$SCRIPT" -- "${FILES[@]}"
         rc=$?
         set -e
         exit "$rc"

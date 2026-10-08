@@ -160,5 +160,42 @@ class NotApplicableTests(unittest.TestCase):
             self.assertEqual(scanned_count(proc), 1)
 
 
+class SeparatorHandlingTests(unittest.TestCase):
+    """ATTACK SURFACE row for F2 (a file literally named '--'), exercised
+    directly against the checker's own argparse — never through the
+    action/git, since a bare '--' has no .py suffix and can never survive
+    the action's `-- '*.py'` pathspec to reach FILES in the first place."""
+
+    def test_literal_dashdash_survives_as_a_path_after_the_boundary(self):
+        """The composite action always sends its own `--` ahead of the
+        file list (see actions/windows-footguns/action.yml). argparse
+        treats only the FIRST `--` it sees as the options/positionals
+        boundary, so a second, literal `--` token — standing in for a
+        changed file that happens to be named exactly that — survives as
+        an ordinary positional path. It has no .py suffix, so it's
+        correctly counted as skipped (not silently eaten as a second
+        separator, and not a crash)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "--").write_text("not python\n", encoding="utf-8")
+            proc = run_script(["--", "--"], root)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn(
+                "NOT-APPLICABLE: 0 python file(s) in scope (1 skipped: (no extension))",
+                proc.stdout,
+            )
+
+    def test_bare_dashdash_alone_is_ordinary_separator_syntax_not_a_bypass(self):
+        """A single `--` with nothing after it is just argparse's normal
+        'end of options, zero positionals follow' — it falls through to
+        the same default (staged-changes) behaviour as no arguments at
+        all. This is not the F2 bypass (nothing is hidden: there was
+        nothing to hide), it just documents the boundary."""
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run_script(["--"], Path(tmp))
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("No staged files to scan", proc.stdout + proc.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

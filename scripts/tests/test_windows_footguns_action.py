@@ -5,9 +5,14 @@ actions/windows-footguns/action.yml (the "Scan changed Python files" step).
 Extracts the step's actual `run:` script out of the YAML (via PyYAML —
 never a flat grep of a .yml file) and executes it as a real bash script
 against fixture git repos built under mktemp, with a STUB checker standing
-in for scripts/check-windows-footguns.py. The stub logs the exact argv it
-received (to prove the file list the action computed is right: --diff-filter
-behaviour, NUL-delimited paths with spaces, renames) and exits with a
+in for scripts/check-windows-footguns.py. The stub logs the argv it
+received, with the step's own `--` separator (see action.yml) dropped from
+the front if present — that separator is argparse-prefix-attack plumbing
+for the REAL checker, not part of the file list this stub exists to verify
+(--diff-filter behaviour, NUL-delimited paths with spaces, renames). The
+real checker's own handling of `--` and of option-shaped filenames is
+exercised separately, against the real script, in
+WindowsFootgunsActionRealCheckerTests below. The stub exits with a
 caller-chosen code (to prove the step's own exit code tracks the checker's
 exit code only, never a text-grep of its output — including when the
 checker's own stdout contains the literal string "NOT-APPLICABLE", which an
@@ -43,8 +48,16 @@ ACTION_YML = REPO_ROOT / "actions" / "windows-footguns" / "action.yml"
 
 STUB_CHECKER = """#!/usr/bin/env python3
 import json, os, sys
+argv = sys.argv[1:]
+# The step always passes a leading `--` (see action.yml) so an option-shaped
+# filename can't be swallowed by the real checker's argparse. Strip just
+# that one separator before logging: this stub verifies the file LIST the
+# action computed, not argparse's own `--` handling (that's covered against
+# the real checker in WindowsFootgunsActionRealCheckerTests).
+if argv and argv[0] == "--":
+    argv = argv[1:]
 with open(os.environ["STUB_LOG"], "w") as f:
-    json.dump(sys.argv[1:], f)
+    json.dump(argv, f)
 # Deliberately misleading: a genuinely-failing run (STUB_EXIT != 0) that
 # still prints the checker's own "NOT-APPLICABLE" phrasing, the way an
 # attacker-named file (NOT-APPLICABLE.py) or a matched source line could.
@@ -53,13 +66,30 @@ sys.exit(int(os.environ.get("STUB_EXIT", "0")))
 """
 
 
-def _run_step_script() -> str:
-    data = yaml.safe_load(ACTION_YML.read_text(encoding="utf-8"))
+def _extract_run_step(data) -> str:
     steps = data["runs"]["steps"]
     for step in steps:
         if step.get("name") == "Scan changed Python files":
             return step["run"]
     raise AssertionError("action.yml: 'Scan changed Python files' step not found")
+
+
+def _run_step_script() -> str:
+    """The step script as it stands in the working tree right now."""
+    return _extract_run_step(yaml.safe_load(ACTION_YML.read_text(encoding="utf-8")))
+
+
+def _run_step_script_from_ref(ref: str) -> str:
+    """The step script as it was at a given git ref (e.g. the pre-fix parent
+    commit 709fabb) — lets a single test demonstrate an exploit was real
+    (red, against the old ref) and is closed (green, against the current
+    working tree) without ever checking the repo out to that ref."""
+    rel = ACTION_YML.relative_to(REPO_ROOT).as_posix()
+    out = subprocess.run(
+        ["git", "show", f"{ref}:{rel}"], cwd=REPO_ROOT, check=True,
+        capture_output=True, text=True,
+    ).stdout
+    return _extract_run_step(yaml.safe_load(out))
 
 
 def _git(args, cwd):
@@ -277,6 +307,135 @@ class WindowsFootgunsActionScript(unittest.TestCase):
         proc = self._run(base_ref="does-not-exist", stub_exit="0")
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertEqual(self._stub_argv(), ["tracked.py"])
+
+
+REAL_CHECKER = (REPO_ROOT / "scripts" / "check-windows-footguns.py").read_text(encoding="utf-8")
+
+# A real, unsuppressed footgun (no `# windows-footgun: ok`, no encoding=):
+# open() without an explicit encoding= on a text-mode call.
+FOOTGUN_LINE = 'x = open("data.txt")\n'
+
+
+class WindowsFootgunsActionRealCheckerTests(unittest.TestCase):
+    """ATTACK SURFACE for F2: the REAL checker (scripts/check-windows-footguns.py),
+    run through the REAL yaml-extracted step script — never the STUB used
+    above, since the exploit lives in the checker's own argparse. Each
+    fixture plants FOOTGUN_LINE so a false NOT-APPLICABLE/exit-0 is
+    distinguishable from a genuine scan that caught it."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        gh_workflows_root = self.tmp / "gh-workflows-checkout"
+        self.action_path = gh_workflows_root / "actions" / "windows-footguns"
+        self.action_path.mkdir(parents=True)
+        checker_dir = gh_workflows_root / "scripts"
+        checker_dir.mkdir(parents=True)
+        (checker_dir / "check-windows-footguns.py").write_text(REAL_CHECKER, encoding="utf-8")
+        self.repo = self.tmp / "consumer-repo"
+        self.repo.mkdir()
+        _git(["init", "-q", str(self.repo)], cwd=self.tmp)
+
+    def _base(self, message="base"):
+        sha = _commit(self.repo, message)
+        _git(["update-ref", "refs/remotes/origin/main", sha], cwd=self.repo)
+        return sha
+
+    def _head(self, message="head"):
+        return _commit(self.repo, message)
+
+    def _write(self, rel, content=""):
+        p = self.repo / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+        return p
+
+    def _run(self, run_script, base_ref="main"):
+        env = {
+            "PATH": "/usr/bin:/bin",
+            "BASE_REF": base_ref,
+            "GITHUB_ACTION_PATH": str(self.action_path),
+        }
+        return subprocess.run(
+            ["bash", "-c", run_script], cwd=self.repo, env=env,
+            capture_output=True, text=True, timeout=30,
+        )
+
+    # -- the reviewer's key evidence -----------------------------------
+
+    def test_diff_equals_filename_no_longer_hides_a_real_footgun(self):
+        """Red on 709fabb (the rejected parent commit, missing `--`): a
+        changed file named '--diff=HEAD.py' is consumed by the checker's
+        own --diff option — not the file list — silently replacing the
+        whole scan with get_diff_files("HEAD.py") (an unresolvable ref on
+        709fabb), which reports NOT-APPLICABLE and exits 0 while the real
+        footgun in bad.py is never scanned. Green on the current (fixed)
+        script: `--` keeps '--diff=HEAD.py' positional, bad.py is scanned,
+        and the step fails on the real footgun."""
+        self._write("bad.py", "x = 1\n")
+        self._base()
+        self._write("bad.py", FOOTGUN_LINE)
+        self._write("--diff=HEAD.py", "z = 1\n")
+        self._head("introduce a footgun alongside a poison filename")
+
+        old = self._run(_run_step_script_from_ref("709fabb"))
+        self.assertEqual(old.returncode, 0, old.stdout + old.stderr)
+        self.assertIn("NOT-APPLICABLE", old.stdout)
+
+        new = self._run(_run_step_script())
+        self.assertEqual(new.returncode, 1, new.stdout + new.stderr)
+        self.assertIn("bad.py", new.stdout)
+        self.assertIn("open() without encoding=", new.stdout)
+
+    def test_diff_abbreviation_no_longer_hides_a_real_footgun(self):
+        """Same exploit via argparse's prefix-abbreviation of --diff:
+        '--dif=x.py' resolves to the same --diff option."""
+        self._write("bad.py", "x = 1\n")
+        self._base()
+        self._write("bad.py", FOOTGUN_LINE)
+        self._write("--dif=x.py", "z = 1\n")
+        self._head("introduce a footgun alongside an abbreviated poison filename")
+
+        old = self._run(_run_step_script_from_ref("709fabb"))
+        self.assertEqual(old.returncode, 0, old.stdout + old.stderr)
+        self.assertIn("NOT-APPLICABLE", old.stdout)
+
+        new = self._run(_run_step_script())
+        self.assertEqual(new.returncode, 1, new.stdout + new.stderr)
+        self.assertIn("bad.py", new.stdout)
+
+    # -- every other option-shaped filename in the ATTACK SURFACE -------
+
+    def _scan_one_option_shaped_file(self, name):
+        self._write(name, "x = 1\n")
+        self._base()
+        self._write(name, FOOTGUN_LINE)
+        self._head(f"add a footgun in a file named {name!r}")
+        return self._run(_run_step_script())
+
+    def test_dashdash_all_py_reaches_the_checker_as_a_path(self):
+        proc = self._scan_one_option_shaped_file("--all.py")
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("--all.py", proc.stdout)
+
+    def test_single_dash_x_py_reaches_the_checker_as_a_path(self):
+        proc = self._scan_one_option_shaped_file("-x.py")
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("-x.py", proc.stdout)
+
+    def test_dashdash_dot_py_reaches_the_checker_as_a_path(self):
+        proc = self._scan_one_option_shaped_file("--.py")
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("--.py", proc.stdout)
+
+    # A file literally named `--` can never appear in FILES here: the
+    # action's own git diff is already scoped to `-- '*.py'`, and `--` has
+    # no .py suffix to match. That row of the ATTACK SURFACE is a property
+    # of the checker's own argparse boundary handling, not of this
+    # action's file-list construction — see
+    # test_check_windows_footguns.py's SeparatorHandlingTests, which
+    # exercises it directly against the real checker without git in the
+    # way.
 
 
 if __name__ == "__main__":
