@@ -30,6 +30,15 @@ logic this file exists to test.
 This is the real run-step script, not a hand-copied duplicate: a future edit
 to action.yml that reintroduces `tr '\\n' ' '` or an allow-list diff-filter
 is caught here without anyone updating this file.
+
+The "red" half of each before/after test reads the pre-fix action and
+checker from scripts/tests/fixtures/ (vendored at build time from the
+rejected parent commit 709fabb — named only in the fixtures' own header
+comments) rather than running `git show 709fabb:...` live: this module used
+to do that at import time, which works in a full clone but raises
+CalledProcessError in a `git clone --depth 1` checkout (CI's unit-tests job
+checks out with the default fetch-depth), and would break for good after
+any squash merge that drops 709fabb from history.
 """
 from __future__ import annotations
 
@@ -45,6 +54,9 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ACTION_YML = REPO_ROOT / "actions" / "windows-footguns" / "action.yml"
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+OLD_ACTION_YML = FIXTURES_DIR / "action_709fabb.yml"
+OLD_CHECKER_PATH = FIXTURES_DIR / "check_windows_footguns_709fabb.py"
 
 STUB_CHECKER = """#!/usr/bin/env python3
 import json, os, sys
@@ -79,17 +91,17 @@ def _run_step_script() -> str:
     return _extract_run_step(yaml.safe_load(ACTION_YML.read_text(encoding="utf-8")))
 
 
-def _run_step_script_from_ref(ref: str) -> str:
-    """The step script as it was at a given git ref (e.g. the pre-fix parent
-    commit 709fabb) — lets a single test demonstrate an exploit was real
-    (red, against the old ref) and is closed (green, against the current
-    working tree) without ever checking the repo out to that ref."""
-    rel = ACTION_YML.relative_to(REPO_ROOT).as_posix()
-    out = subprocess.run(
-        ["git", "show", f"{ref}:{rel}"], cwd=REPO_ROOT, check=True,
-        capture_output=True, text=True,
-    ).stdout
-    return _extract_run_step(yaml.safe_load(out))
+def _old_run_step_script() -> str:
+    """The step script as it stood at the rejected parent commit 709fabb —
+    lets a single test demonstrate an exploit was real (red, against the old
+    script) and is closed (green, against the current working tree).
+
+    Reads a vendored fixture (scripts/tests/fixtures/action_709fabb.yml),
+    never `git show 709fabb:...`: a CI checkout with fetch-depth 1 (see
+    ci.yml's unit-tests job) does not carry that history, so a live `git
+    show` at import time made this whole module fail to import there; and a
+    future squash merge would drop 709fabb for good either way."""
+    return _extract_run_step(yaml.safe_load(OLD_ACTION_YML.read_text(encoding="utf-8")))
 
 
 def _git(args, cwd):
@@ -319,10 +331,11 @@ REAL_CHECKER = (REPO_ROOT / "scripts" / "check-windows-footguns.py").read_text(e
 # scope. F4 later makes an unresolvable ref fail loudly (exit 2) instead —
 # a real improvement, but a different signal — so reproducing the original
 # evidence needs the original checker, not today's doubly-patched one.
-OLD_CHECKER = subprocess.run(
-    ["git", "show", "709fabb:scripts/check-windows-footguns.py"],
-    cwd=REPO_ROOT, check=True, capture_output=True, text=True,
-).stdout
+#
+# Read from a vendored fixture (scripts/tests/fixtures/check_windows_footguns_709fabb.py),
+# never `git show 709fabb:...` at import time — see _old_run_step_script's
+# docstring for why a live git-history read breaks a depth-1 CI checkout.
+OLD_CHECKER = OLD_CHECKER_PATH.read_text(encoding="utf-8")
 
 # A real, unsuppressed footgun (no `# windows-footgun: ok`, no encoding=):
 # open() without an explicit encoding= on a text-mode call.
@@ -397,7 +410,7 @@ class WindowsFootgunsActionRealCheckerTests(unittest.TestCase):
         self._head("introduce a footgun alongside a poison filename")
 
         self._use_checker(OLD_CHECKER)
-        old = self._run(_run_step_script_from_ref("709fabb"))
+        old = self._run(_old_run_step_script())
         self.assertEqual(old.returncode, 0, old.stdout + old.stderr)
         self.assertIn("NOT-APPLICABLE", old.stdout)
 
@@ -418,7 +431,7 @@ class WindowsFootgunsActionRealCheckerTests(unittest.TestCase):
         self._head("introduce a footgun alongside an abbreviated poison filename")
 
         self._use_checker(OLD_CHECKER)
-        old = self._run(_run_step_script_from_ref("709fabb"))
+        old = self._run(_old_run_step_script())
         self.assertEqual(old.returncode, 0, old.stdout + old.stderr)
         self.assertIn("NOT-APPLICABLE", old.stdout)
 
@@ -501,7 +514,7 @@ class FailClosedGitListingTests(unittest.TestCase):
         )
 
     def test_old_script_masks_a_failing_git_listing_as_not_applicable(self):
-        proc = self._run(_run_step_script_from_ref("709fabb"))
+        proc = self._run(_old_run_step_script())
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("No Python files to scan.", proc.stdout)
         self.assertFalse(self.stub_log.exists())
