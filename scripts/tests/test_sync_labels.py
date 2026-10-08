@@ -159,9 +159,15 @@ class SyncLabels(unittest.TestCase):
                 rc, out, err = run(argv)
                 # A case-mismatch is NOT full convergence: a scheduled
                 # --apply run must see a distinct nonzero code, not 0, or it
-                # silently never notices the pending rename (fleet-harness
-                # follow-up from PR #50/#51 review: exit 0 hid this).
-                self.assertEqual(rc, sl.EXIT_CASE_MISMATCH)
+                # silently never notices the pending rename (follow-up from
+                # the PR #50/#51 review: exit 0 hid this).
+                # Pin the literal contract value, not the module constant:
+                # a test that only mirrors sl.EXIT_CASE_MISMATCH back at
+                # itself can't catch a regression in the constant, and
+                # against a checkout that predates it, assertEqual would
+                # raise AttributeError instead of failing as a normal
+                # assertion.
+                self.assertEqual(rc, 3)
                 self.assertIn("case-mismatch", out)
                 self.assertIn("Type:Bug", out)
                 self.assertIn("type:bug", out)
