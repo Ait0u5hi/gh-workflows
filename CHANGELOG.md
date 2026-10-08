@@ -58,6 +58,30 @@ tags callers pin (`@v1`). See [README → Versioning](README.md#versioning).
   (3) when the only problem is a pending rename — 0 still means full
   convergence, and 1 (a `gh` API/auth failure) always wins over 3 even when
   both occur in the same run. See README → Label sync for the exit-code table.
+- `scripts/tests/fixtures/check_windows_footguns_709fabb.py`: this vendored
+  pre-fix checker fixture is self-referential, like `check-windows-footguns.py`
+  itself, and reddened the repo's own self-lint. The governance gate
+  (`reusable-crossplatform-lint.yml`) runs the windows-footguns composite action
+  at a pinned tag, which fetches the checker script at that tag, so a fix in
+  `check-windows-footguns.py` on this repo's HEAD would never reach it. Renamed
+  the fixture to `check_windows_footguns_709fabb.py.txt` instead: every checker
+  version only scans `*.py`/`*.pyw`/`*.pyi` files, so a fixture under any other
+  extension is out of scope regardless of which tag is pinned. A new unit test
+  asserts `scripts/tests/fixtures/` contains no `*.py` file, and another runs
+  the real checker over `scripts/tests/` (fixtures included) and asserts a
+  clean pass, so neither this fixture nor a future one can redden the gate
+  silently again.
+- `actions/windows-footguns`: a changed file whose name starts with `::` used
+  to reach the job log at column 0 through the checker's own finding lines, so
+  a file named e.g. `::add-mask::x.py` could forge a GitHub Actions workflow
+  command. The step now brackets the checker call with
+  `::stop-commands::<token>` ... `::<token>::`, where the token is fresh per
+  run from `/dev/urandom` (never the run id, `$$`, or a timestamp) and the
+  resume is unconditional in the existing EXIT trap, so it fires on every exit
+  path: a real footgun, a clean pass, a missing checker script, or a `set -e`
+  abort from a failing git listing outside a repo. The existing fixed-string
+  `::notice::` (merge-base fallback) is emitted before the window opens and
+  stays a real command.
 
 ### Added
 - `labels.yml` + `scripts/sync_labels.py`: the shared issue-label taxonomy
