@@ -1,0 +1,87 @@
+# Vendored fixture: actions/windows-footguns/action.yml exactly as it stood
+# at the rejected parent commit 709fabb (named only here, never used by the
+# tests to `git show` it live — a depth-1 CI checkout doesn't carry that
+# history, and a squash merge would drop it for good). This is the pre-F2/
+# pre-F3 action: no `--` separator before the file list (F2's exploit) and
+# the file list is built via `< <(git diff ...)` process substitution,
+# whose exit status `set -e` never observes (F3's fail-open bug). Used by
+# scripts/tests/test_windows_footguns_action.py to reproduce both bugs'
+# original red without needing git history.
+#
+# Composite action wrapping the vendored cross-platform footgun linter.
+# Referenced by reusable-crossplatform-lint.yml. Using a composite action (rather
+# than a second `actions/checkout` of this private repo) lets consumers pull the
+# linter with the same same-owner private-access grant that already resolves the
+# reusable workflow — no cross-repo token, no repo-visibility change. The full
+# gh-workflows repo is fetched alongside the action, so the linter script at
+# scripts/check-windows-footguns.py is reachable relative to this action.
+name: Windows footgun scan
+description: Diff changed Python files against a base ref and scan them for Windows/cross-platform footguns.
+
+inputs:
+  base-ref:
+    description: Base branch to diff changed files against.
+    required: false
+    default: main
+
+runs:
+  using: composite
+  steps:
+    - name: Scan changed Python files
+      shell: bash
+      env:
+        BASE_REF: ${{ inputs.base-ref }}
+      run: |
+        set -euo pipefail
+        SCRIPT="${GITHUB_ACTION_PATH}/../../scripts/check-windows-footguns.py"
+        BASE=$(git merge-base "origin/${BASE_REF}" HEAD 2>/dev/null || true)
+
+        # NUL-delimited into a bash array, never `tr '\n' ' '` + unquoted
+        # word-split: a changed path containing a space (or any byte but
+        # NUL) must survive as a single argv element to the checker.
+        #
+        # --diff-filter=d excludes Deleted paths only — there is nothing on
+        # disk left to scan for one, and passing it through used to make the
+        # checker count it as a no-op "skipped" path for no reason. It
+        # deliberately does NOT use an allow-list like --diff-filter=AM:
+        # that would also exclude Renamed/Copied paths, silently stopping
+        # the scan of a file that was renamed with edits. -M turns an
+        # unmodified rename's delete+add pair into a single R entry (so the
+        # d-filter has nothing to drop); -C (copy detection) is not enabled
+        # — it's expensive, and a copy still shows up as a plain Added path
+        # here, which is still scanned correctly.
+        FILES=()
+        if [ -n "$BASE" ]; then
+          while IFS= read -r -d '' f; do
+            FILES+=("$f")
+          done < <(git diff -z -M --diff-filter=d --name-only "${BASE}..HEAD" -- '*.py')
+        else
+          while IFS= read -r -d '' f; do
+            FILES+=("$f")
+          done < <(git ls-files -z -- '*.py')
+        fi
+
+        if [ "${#FILES[@]}" -eq 0 ]; then
+          echo "No Python files to scan."
+          exit 0
+        fi
+        printf 'Scanning:\n'
+        printf '  %s\n' "${FILES[@]}"
+
+        # This step's result is ALWAYS exactly the checker's exit code — we
+        # never grep its stdout (e.g. for the checker's own "NOT-APPLICABLE"
+        # line) to decide pass/fail. The checker scans attacker-influenced
+        # source: a file literally named NOT-APPLICABLE.py, or a matched
+        # source line that happens to contain that text, would let crafted
+        # content turn a real footgun finding (exit 1) into a false
+        # "neutral" if we keyed off text instead of the exit code. The
+        # checker's NOT-APPLICABLE line (printed to stdout above when it
+        # applies — e.g. every changed .py file turned out to be excluded)
+        # is informational for a human reading the log; it changes nothing
+        # here, because it already shares exit 0 with a clean pass in the
+        # checker's own contract (see its docstring).
+        set +e
+        python3 "$SCRIPT" "${FILES[@]}"
+        rc=$?
+        set -e
+        exit "$rc"

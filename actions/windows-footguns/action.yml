@@ -22,16 +22,136 @@ runs:
       env:
         BASE_REF: ${{ inputs.base-ref }}
       run: |
+        set -euo pipefail
         SCRIPT="${GITHUB_ACTION_PATH}/../../scripts/check-windows-footguns.py"
         BASE=$(git merge-base "origin/${BASE_REF}" HEAD 2>/dev/null || true)
+
+        # A fixed string only — never the base-ref (a workflow `inputs:`
+        # value, so caller-controlled) or any filename. GitHub Actions reads
+        # an `::...::` line as a workflow command: a base-ref or path
+        # containing its own `::` (or a crafted newline) could otherwise
+        # forge a second command — e.g. close off this notice early and
+        # open an `::error::` or `::add-mask::` of its own. A fixed string
+        # has nothing in it for an attacker to shape, so this is the
+        # notice's entire content.
+        if [ -z "$BASE" ]; then
+          echo "::notice::windows-footguns: merge-base not found against the base ref; scanning every tracked .py file"
+        fi
+
+        # From here on, a changed file's NAME is attacker-influenced (any
+        # branch pushed to a fork can add one) and gets printed literally,
+        # in the "Scanning:" listing below, and in the checker's own
+        # finding lines (check-windows-footguns.py prints "{rel}:{lineno}:
+        # ..." for every match). GitHub Actions reads a line starting with
+        # `::` as a workflow command, so a file named e.g.
+        # `::add-mask::x.py` or `::error::pwned.py` would otherwise forge
+        # one. `::stop-commands::<TOKEN>` disables command processing for
+        # everything printed until the matching `::<TOKEN>::`, so that
+        # text, however it's shaped, prints as inert log output instead.
+        #
+        # TOKEN comes from /dev/urandom, never $GITHUB_RUN_ID, $$, or a
+        # timestamp: all three are either predictable or visible to the
+        # same workflow run that would want to forge the resume line
+        # early and reopen command processing itself. A crafted filename
+        # cannot be made equal to an unpredictable token it never sees.
+        #
+        # The resume echo lives in the EXIT trap below, unconditionally,
+        # not only on a success path, so it fires whether the step ends
+        # via the checker's own exit code at the bottom, or via a `set -e`
+        # abort from a failing git command further down (see F3/rc 128
+        # below). A trap command never changes the shell's own exit
+        # status unless it calls `exit` itself, which this one does not,
+        # so the step's real exit code is preserved either way. The fixed
+        # `::notice::` above is deliberately OUTSIDE this window (it is
+        # printed before TOKEN even exists): it is a fixed string with
+        # nothing attacker-shaped in it, so it needs no protection, and
+        # disabling commands before it would also swallow that notice.
+        TOKEN=$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')
+        echo "::stop-commands::${TOKEN}"
+
+        # NUL-delimited into a bash array, never `tr '\n' ' '` + unquoted
+        # word-split: a changed path containing a space (or any byte but
+        # NUL) must survive as a single argv element to the checker.
+        #
+        # --diff-filter=d excludes Deleted paths only — there is nothing on
+        # disk left to scan for one, and passing it through used to make the
+        # checker count it as a no-op "skipped" path for no reason. It
+        # deliberately does NOT use an allow-list like --diff-filter=AM:
+        # that would also exclude Renamed/Copied paths, silently stopping
+        # the scan of a file that was renamed with edits. -M turns an
+        # unmodified rename's delete+add pair into a single R entry (so the
+        # d-filter has nothing to drop); -C (copy detection) is not enabled
+        # — it's expensive, and a copy still shows up as a plain Added path
+        # here, which is still scanned correctly.
+        #
+        # The NUL-delimited listing is written to a plain temp file and
+        # read back, never piped straight into the while-loop via process
+        # substitution (`< <(...)`). Process substitution runs the git
+        # command in a subshell whose exit status `set -e` never sees — a
+        # failing `git diff`/`git ls-files` (not a git repo, a corrupted
+        # checkout, a bad base ref) would silently produce no output, so
+        # FILES stayed empty and the step printed its own benign "No Python
+        # files to scan." and exited 0, indistinguishable from a real
+        # empty diff. Writing to a file first keeps the git command a
+        # plain simple command in the main shell, so `set -e` aborts the
+        # step the moment it fails.
+        FILE_LIST_DIR=$(mktemp -d)
+        # Cleaned up on every exit from this point on — including a `set -e`
+        # abort from a failing `git diff`/`git ls-files` below, not just the
+        # happy path at the bottom of the script. An explicit `rm -rf` only
+        # on the success path would leak FILE_LIST_DIR on that failure path.
+        # The resume echo alongside it is just as unconditional, for the
+        # same reason (see the TOKEN comment above). EXIT traps don't
+        # change the shell's own exit status unless the trap command
+        # itself calls `exit`, which this one never does, so the step's
+        # real exit code (a failing git command's under `set -e`, or $rc
+        # at the bottom) is preserved either way.
+        trap 'echo "::${TOKEN}::"; rm -rf "$FILE_LIST_DIR"' EXIT
+        FILE_LIST="${FILE_LIST_DIR}/changed-py-files.nul"
         if [ -n "$BASE" ]; then
-          FILES=$(git diff --name-only "${BASE}..HEAD" -- '*.py' | tr '\n' ' ')
+          git diff -z -M --diff-filter=d --name-only "${BASE}..HEAD" -- '*.py' > "$FILE_LIST"
         else
-          FILES=$(git ls-files '*.py' | tr '\n' ' ')
+          git ls-files -z -- '*.py' > "$FILE_LIST"
         fi
-        if [ -z "${FILES// }" ]; then
-          echo "No Python files to scan."; exit 0
+        FILES=()
+        while IFS= read -r -d '' f; do
+          FILES+=("$f")
+        done < "$FILE_LIST"
+
+        if [ "${#FILES[@]}" -eq 0 ]; then
+          echo "No Python files to scan."
+          exit 0
         fi
-        echo "Scanning: $FILES"
-        # shellcheck disable=SC2086  # intentional word-split: pass files as separate args
-        python3 "$SCRIPT" $FILES
+        printf 'Scanning:\n'
+        printf '  %s\n' "${FILES[@]}"
+
+        # This step's result is ALWAYS exactly the checker's exit code — we
+        # never grep its stdout (e.g. for the checker's own "NOT-APPLICABLE"
+        # line) to decide pass/fail. The checker scans attacker-influenced
+        # source: a file literally named NOT-APPLICABLE.py, or a matched
+        # source line that happens to contain that text, would let crafted
+        # content turn a real footgun finding (exit 1) into a false
+        # "neutral" if we keyed off text instead of the exit code. The
+        # checker's NOT-APPLICABLE line (printed to stdout above when it
+        # applies — e.g. every changed .py file turned out to be excluded)
+        # is informational for a human reading the log; it changes nothing
+        # here, because it already shares exit 0 with a clean pass in the
+        # checker's own contract (see its docstring).
+        #
+        # `--` before the file list is load-bearing, not decorative: the
+        # checker's argparse defines --all/--diff/--list, and without a
+        # `--` boundary a changed file literally named e.g. `--diff=HEAD.py`
+        # (or its unambiguous abbreviation `--dif=x.py`) is consumed as the
+        # --diff option instead of reaching `paths`. That silently replaces
+        # the whole file list with get_diff_files("HEAD.py") — usually an
+        # unresolvable ref, which used to report NOT-APPLICABLE/exit 0 and
+        # hide a real footgun in another changed file. `--` makes every
+        # token after it positional, even one that is itself the literal
+        # string `--` (argparse only treats the FIRST `--` as the
+        # separator), so an option-shaped filename always reaches the
+        # checker as a path to scan.
+        set +e
+        python3 "$SCRIPT" -- "${FILES[@]}"
+        rc=$?
+        set -e
+        exit "$rc"

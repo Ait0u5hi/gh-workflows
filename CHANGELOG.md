@@ -6,6 +6,83 @@ tags callers pin (`@v1`). See [README → Versioning](README.md#versioning).
 
 ## [Unreleased]
 
+### Fixed
+- `actions/windows-footguns`: the diff step now builds its file list
+  NUL-delimited into a bash array (a path with a space used to get
+  word-split by `tr '\n' ' '` into two bogus argv entries) and with
+  `git diff -M --diff-filter=d`, which excludes only Deleted paths while
+  keeping Renamed/Copied ones — the previous unfiltered `git diff` passed
+  a deleted path's now-gone name straight to the checker. The step's own
+  exit code is always exactly the checker's exit code; it never greps the
+  checker's stdout (e.g. for its "NOT-APPLICABLE" line) to decide pass/fail,
+  since that text can also appear in a genuinely-failing run (a matched
+  source line, or a file literally named `NOT-APPLICABLE.py`).
+- `ci.yml` unit-tests job: the pinned ripgrep install is x86_64/amd64 only.
+  It now checks `runner.arch` first and fails the job loudly (`::error::`,
+  exit 1) on anything else, before any download — previously an
+  arm64/other runner would hit this step blind and either get a cryptic
+  "exec format error" well into the job, or (worse, if ripgrep happened to
+  run under emulation) silently never exercise the pinned binary the tests
+  assume.
+- `actions/windows-footguns` further hardening of the same diff step: a
+  changed file literally named e.g. `--diff=HEAD.py` (or its unambiguous
+  abbreviation `--dif=x.py`) used to be consumed by the checker's own
+  argparse as the `--diff` option instead of reaching the file list,
+  silently replacing the whole scan and hiding a real footgun in another
+  changed file — a `--` separator now makes every token after it
+  positional. The file list is also built via a plain temp file, never
+  `while read ... < <(git diff ...)` process substitution: that ran the
+  git command in a subshell whose exit status `set -e` never observed, so
+  a failing `git diff`/`git ls-files` (not a git repo, a corrupted
+  checkout) was silently read as an empty diff instead of failing the
+  step. That temp directory is now removed by a `trap ... EXIT`, not only
+  by an `rm -rf` reached solely on the success path, so it's no longer
+  leaked on that same failure path; the trap doesn't call `exit` itself,
+  so it never changes the step's own exit code. When the merge-base
+  lookup itself fails (a shallow or unrelated-history base ref) and the
+  step falls back to scanning every tracked `.py` file, it now prints a
+  fixed-string `::notice::` saying so — never the base-ref or a filename,
+  since either is caller-influenced and an `::...::` line is a GitHub
+  Actions workflow command an attacker-shaped value could otherwise forge
+  a second one inside.
+- `scripts/check-windows-footguns.py`: `--diff <ref>` with a ref that doesn't
+  resolve to a commit (a typo, a renamed or never-fetched base branch) used
+  to be indistinguishable from a ref that resolves cleanly but has zero
+  changed `.py` files — both silently reported `NOT-APPLICABLE`/exit 0. An
+  unresolvable ref now exits 2 with a stderr message instead; a resolvable
+  ref with nothing changed still gets the documented `NOT-APPLICABLE`/exit 0
+  (the lookup worked, there's just nothing to report).
+- `scripts/sync_labels.py`: a case-mismatch used to exit 0 with no summary, so a
+  scheduled `--apply` run could never notice it. It now prints a stderr footer
+  ("N label(s) need a manual case rename") and exits with a new, distinct code
+  (3) when the only problem is a pending rename — 0 still means full
+  convergence, and 1 (a `gh` API/auth failure) always wins over 3 even when
+  both occur in the same run. See README → Label sync for the exit-code table.
+- `scripts/tests/fixtures/check_windows_footguns_709fabb.py`: this vendored
+  pre-fix checker fixture is self-referential, like `check-windows-footguns.py`
+  itself, and reddened the repo's own self-lint. The governance gate
+  (`reusable-crossplatform-lint.yml`) runs the windows-footguns composite action
+  at a pinned tag, which fetches the checker script at that tag, so a fix in
+  `check-windows-footguns.py` on this repo's HEAD would never reach it. Renamed
+  the fixture to `check_windows_footguns_709fabb.py.txt` instead: every checker
+  version only scans `*.py`/`*.pyw`/`*.pyi` files, so a fixture under any other
+  extension is out of scope regardless of which tag is pinned. A new unit test
+  asserts `scripts/tests/fixtures/` contains no `*.py` file, and another runs
+  the real checker over `scripts/tests/` (fixtures included) and asserts a
+  clean pass, so neither this fixture nor a future one can redden the gate
+  silently again.
+- `actions/windows-footguns`: a changed file whose name starts with `::` used
+  to reach the job log at column 0 through the checker's own finding lines, so
+  a file named e.g. `::add-mask::x.py` could forge a GitHub Actions workflow
+  command. The step now brackets the checker call with
+  `::stop-commands::<token>` ... `::<token>::`, where the token is fresh per
+  run from `/dev/urandom` (never the run id, `$$`, or a timestamp) and the
+  resume is unconditional in the existing EXIT trap, so it fires on every exit
+  path: a real footgun, a clean pass, a missing checker script, or a `set -e`
+  abort from a failing git listing outside a repo. The existing fixed-string
+  `::notice::` (merge-base fallback) is emitted before the window opens and
+  stays a real command.
+
 ### Added
 - `labels.yml` + `scripts/sync_labels.py`: the shared issue-label taxonomy
   (`type:bug|friction|gap|debt|flaky`, `source:agent|human`, `status:carded`) and an

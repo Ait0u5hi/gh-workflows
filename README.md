@@ -139,6 +139,36 @@ Reference intra-org, ref-pinned (`@v1`), same as the reusables:
 - `templates/pr-governance.yml` — contributor-attribution + cross-platform
   footgun checks (copy to `.github/workflows/`)
 
+## Label sync
+
+`scripts/sync_labels.py` converges one or more repos onto the shared taxonomy
+in `labels.yml`. Dry run by default (prints the plan, makes no `gh` call that
+changes a repo); pass `--apply` to make the changes. It never deletes or
+renames a label — a label whose only drift is case (`Type:Bug` held,
+`type:bug` in the taxonomy) is reported as `case-mismatch` and left alone in
+both modes, because `gh label create --force` would case-rename the existing
+label.
+
+```
+python3 scripts/sync_labels.py OWNER/REPO [OWNER/REPO ...]           # plan
+python3 scripts/sync_labels.py --apply OWNER/REPO [OWNER/REPO ...]   # apply
+```
+
+Exit status, checked by a caller's `$?` (dry run and `--apply` behave the
+same way):
+
+| Code | Meaning |
+|---|---|
+| 0 | Every repo converged (or would): no `gh` failure, no case-mismatch. |
+| 1 | At least one repo's `gh` call failed (API/auth error, timeout, missing `gh`, a repo that doesn't exist, ...). A failure on one repo does not stop the others. This code wins even when a case-mismatch also occurred in the same run — a scheduled `--apply` run must never read "exit 1" as "only a rename is pending" when a repo actually failed. |
+| 3 | No repo failed, but at least one label is a case-mismatch needing a manual rename. Exit 3 is distinct from 0 so a scheduled run notices instead of silently exiting clean, and distinct from 1 so "needs a rename" and "gh is broken" are never confused. |
+
+Either nonzero case prints a stderr footer naming the count: exit 1 prints
+`sync_labels: N repo(s) failed: <repo>, <repo>, ...`; exit 3 prints
+`sync_labels: N label(s) need a manual case rename`. Both footers can print
+in the same run (a failure on one repo alongside a case-mismatch on
+another) — the exit code still follows the precedence above (1 wins).
+
 ## Contribution governance
 
 `CONTRIBUTING.md`, `.github/PULL_REQUEST_TEMPLATE.md`, and the two governance
