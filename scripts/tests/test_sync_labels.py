@@ -197,7 +197,7 @@ class SyncLabels(unittest.TestCase):
                  {"name": "TYPE:BUG", "color": "ffffff", "description": "y"}]
         self.gh.holds("EXAMPLE-owner/a", held)
         rc, out, err = run(["--apply", "EXAMPLE-owner/a"])
-        self.assertEqual(rc, sl.EXIT_CASE_MISMATCH)
+        self.assertEqual(rc, 3)  # literal contract value, see above
         self.assertIn("case-mismatch", out)
         self.assertIn("Type:Bug", out)
         self.assertIn("TYPE:BUG", out)
@@ -215,7 +215,7 @@ class SyncLabels(unittest.TestCase):
         self.gh.holds("EXAMPLE-owner/a", held)
         rc, _, err = run(["--apply", "EXAMPLE-owner/broken", "EXAMPLE-owner/a"])
         self.assertEqual(rc, sl.EXIT_ERROR)
-        self.assertNotEqual(rc, sl.EXIT_CASE_MISMATCH)
+        self.assertNotEqual(rc, 3)  # literal contract value, see above
         self.assertIn("EXAMPLE-owner/broken: FAILED", err)
         # Both conditions are still reported, even though the error wins the
         # exit code — a human reading stderr sees the full picture.

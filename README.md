@@ -163,8 +163,11 @@ same way):
 | 1 | At least one repo's `gh` call failed (API/auth error, timeout, missing `gh`, a repo that doesn't exist, ...). A failure on one repo does not stop the others. This code wins even when a case-mismatch also occurred in the same run — a scheduled `--apply` run must never read "exit 1" as "only a rename is pending" when a repo actually failed. |
 | 3 | No repo failed, but at least one label is a case-mismatch needing a manual rename. Exit 3 is distinct from 0 so a scheduled run notices instead of silently exiting clean, and distinct from 1 so "needs a rename" and "gh is broken" are never confused. |
 
-Either nonzero case prints a stderr footer with the count (e.g. `sync_labels:
-1 label(s) need a manual case rename`).
+Either nonzero case prints a stderr footer naming the count: exit 1 prints
+`sync_labels: N repo(s) failed: <repo>, <repo>, ...`; exit 3 prints
+`sync_labels: N label(s) need a manual case rename`. Both footers can print
+in the same run (a failure on one repo alongside a case-mismatch on
+another) — the exit code still follows the precedence above (1 wins).
 
 ## Contribution governance
 
