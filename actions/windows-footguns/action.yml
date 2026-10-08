@@ -65,6 +65,15 @@ runs:
         # plain simple command in the main shell, so `set -e` aborts the
         # step the moment it fails.
         FILE_LIST_DIR=$(mktemp -d)
+        # Cleaned up on every exit from this point on — including a `set -e`
+        # abort from a failing `git diff`/`git ls-files` below, not just the
+        # happy path at the bottom of the script. An explicit `rm -rf` only
+        # on the success path would leak FILE_LIST_DIR on that failure path.
+        # EXIT traps don't change the shell's own exit status unless the
+        # trap command itself calls `exit`, which this one never does, so
+        # the step's real exit code (a failing git command's under `set -e`,
+        # or $rc at the bottom) is preserved either way.
+        trap 'rm -rf "$FILE_LIST_DIR"' EXIT
         FILE_LIST="${FILE_LIST_DIR}/changed-py-files.nul"
         if [ -n "$BASE" ]; then
           git diff -z -M --diff-filter=d --name-only "${BASE}..HEAD" -- '*.py' > "$FILE_LIST"
@@ -75,7 +84,6 @@ runs:
         while IFS= read -r -d '' f; do
           FILES+=("$f")
         done < "$FILE_LIST"
-        rm -rf "$FILE_LIST_DIR"
 
         if [ "${#FILES[@]}" -eq 0 ]; then
           echo "No Python files to scan."

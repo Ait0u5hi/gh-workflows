@@ -546,6 +546,12 @@ class FailClosedGitListingTests(unittest.TestCase):
         # `git ls-files` must all fail here.
         self.non_git_dir = self.tmp / "not-a-repo"
         self.non_git_dir.mkdir()
+        # A dedicated, otherwise-empty directory for the script's own
+        # `mktemp -d` to create FILE_LIST_DIR under (mktemp honours
+        # $TMPDIR). Left non-empty after a run means the F-D trap (or lack
+        # of one) failed to clean up FILE_LIST_DIR.
+        self.mktemp_scratch = self.tmp / "mktemp-scratch"
+        self.mktemp_scratch.mkdir()
 
     def _run(self, run_script):
         env = {
@@ -554,6 +560,7 @@ class FailClosedGitListingTests(unittest.TestCase):
             "GITHUB_ACTION_PATH": str(self.action_path),
             "STUB_LOG": str(self.stub_log),
             "STUB_EXIT": "1",  # would fail loudly if ever invoked
+            "TMPDIR": str(self.mktemp_scratch),
         }
         return subprocess.run(
             ["bash", "-c", run_script], cwd=self.non_git_dir, env=env,
@@ -567,10 +574,93 @@ class FailClosedGitListingTests(unittest.TestCase):
         self.assertFalse(self.stub_log.exists())
 
     def test_fixed_script_fails_closed_on_a_failing_git_listing(self):
+        """F3 (fail closed) and F-D (trap preserves the exit code): `git
+        ls-files` outside a repo exits 128 ('fatal: not a git repository'),
+        and that is exactly the step's own exit code — `set -e` aborts the
+        script right there, the EXIT trap cleans up FILE_LIST_DIR, and
+        nothing downstream (not even the trap itself) changes the code the
+        script exits with."""
         proc = self._run(_run_step_script())
-        self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual(proc.returncode, 128, proc.stdout + proc.stderr)
         self.assertNotIn("No Python files to scan.", proc.stdout)
         self.assertFalse(self.stub_log.exists(), "checker ran despite a failed git listing")
+        self.assertEqual(
+            list(self.mktemp_scratch.iterdir()), [],
+            "FILE_LIST_DIR leaked on the failing-git-listing path",
+        )
+
+
+class TempDirTrapTests(unittest.TestCase):
+    """F-D: FILE_LIST_DIR (the step's own `mktemp -d`) is cleaned up by a
+    `trap ... EXIT`, not only by an explicit `rm -rf` reached solely on the
+    success path — and the trap must never mask the step's real exit code,
+    on the success path or a failing one."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        gh_workflows_root = self.tmp / "gh-workflows-checkout"
+        self.action_path = gh_workflows_root / "actions" / "windows-footguns"
+        self.action_path.mkdir(parents=True)
+        self.checker_file = gh_workflows_root / "scripts" / "check-windows-footguns.py"
+        self.checker_file.parent.mkdir(parents=True)
+        self.checker_file.write_text(REAL_CHECKER, encoding="utf-8")
+        self.repo = self.tmp / "consumer-repo"
+        self.repo.mkdir()
+        _git(["init", "-q", str(self.repo)], cwd=self.tmp)
+        self.mktemp_scratch = self.tmp / "mktemp-scratch"
+        self.mktemp_scratch.mkdir()
+
+    def _base(self, message="base"):
+        sha = _commit(self.repo, message)
+        _git(["update-ref", "refs/remotes/origin/main", sha], cwd=self.repo)
+        return sha
+
+    def _head(self, message="head"):
+        return _commit(self.repo, message)
+
+    def _write(self, rel, content=""):
+        p = self.repo / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+        return p
+
+    def _run(self, base_ref="main"):
+        env = {
+            "PATH": "/usr/bin:/bin",
+            "BASE_REF": base_ref,
+            "GITHUB_ACTION_PATH": str(self.action_path),
+            "TMPDIR": str(self.mktemp_scratch),
+        }
+        return subprocess.run(
+            ["bash", "-c", _run_step_script()], cwd=self.repo, env=env,
+            capture_output=True, text=True, timeout=30,
+        )
+
+    def _assert_scratch_empty(self):
+        self.assertEqual(
+            list(self.mktemp_scratch.iterdir()), [],
+            "FILE_LIST_DIR leaked under TMPDIR after the step exited",
+        )
+
+    def test_no_leaked_tempdir_and_rc_preserved_on_a_real_footgun(self):
+        self._write("bad.py", "x = 1\n")
+        self._base()
+        self._write("bad.py", FOOTGUN_LINE)
+        self._head("introduce a footgun")
+        proc = self._run()
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("open() without encoding=", proc.stdout)
+        self._assert_scratch_empty()
+
+    def test_no_leaked_tempdir_on_a_clean_pass(self):
+        self._write("a.py", "x = 1\n")
+        self._base()
+        self._write("a.py", 'x = open("data.txt", encoding="utf-8")\n')
+        self._head("a clean, suppressed-by-construction change")
+        proc = self._run()
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self._assert_scratch_empty()
 
 
 if __name__ == "__main__":
