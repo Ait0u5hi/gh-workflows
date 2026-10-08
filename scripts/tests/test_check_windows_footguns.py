@@ -160,6 +160,32 @@ class NotApplicableTests(unittest.TestCase):
             self.assertEqual(scanned_count(proc), 1)
 
 
+class DiffRefTests(unittest.TestCase):
+    """F4: --diff used to swallow an unresolvable ref the same way it
+    swallows a resolvable ref with zero changed .py files — both reported
+    NOT-APPLICABLE and exited 0. An unresolvable ref is a usage error
+    (typo, renamed/unfetched base branch, ...) and must fail loudly;
+    NOT-APPLICABLE stays reserved for a ref that resolves but genuinely
+    has nothing to scan. These run against REPO_ROOT (this checkout) via
+    `git rev-parse`/`git diff`, read-only — no network, no mutation."""
+
+    REPO_ROOT = Path(__file__).resolve().parents[2]
+
+    def test_unresolvable_diff_ref_fails_loudly(self):
+        proc = run_script(["--diff", "no-such-ref-7f3c9-does-not-exist"], self.REPO_ROOT)
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertNotIn("NOT-APPLICABLE", proc.stdout)
+        self.assertIn("no-such-ref-7f3c9-does-not-exist", proc.stdout + proc.stderr)
+
+    def test_resolvable_ref_with_no_py_changes_stays_not_applicable(self):
+        """HEAD...HEAD is an empty diff — the ref resolves fine, there is
+        just nothing changed. This must still be the documented
+        NOT-APPLICABLE/exit-0 outcome, not the new error path."""
+        proc = run_script(["--diff", "HEAD"], self.REPO_ROOT)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("NOT-APPLICABLE", proc.stdout)
+
+
 class SeparatorHandlingTests(unittest.TestCase):
     """ATTACK SURFACE row for F2 (a file literally named '--'), exercised
     directly against the checker's own argparse — never through the

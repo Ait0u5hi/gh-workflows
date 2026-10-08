@@ -31,6 +31,13 @@ Exit status:
         non-zero code would turn that job red. Callers that gate a handoff
         should grep for NOT-APPLICABLE.
     1 — at least one unsuppressed match
+    2 — --diff was given a ref that doesn't resolve to a commit (bad ref
+        name, typo, a base branch that was renamed or never fetched, ...).
+        This is distinct from the 0/NOT-APPLICABLE case above: a ref that
+        DOES resolve but has zero changed .py files is still NOT-APPLICABLE/
+        exit 0 (nothing to report, but the lookup itself worked); a ref that
+        doesn't resolve at all is a usage error and must fail loudly, never
+        get silently counted as "zero files changed."
 
 Suppress an intentional use (e.g. tests or platform-gated code) with:
     os.kill(pid, 0)  # windows-footgun: ok — only called on POSIX
@@ -612,8 +619,36 @@ def get_staged_files() -> list[Path]:
     return [REPO_ROOT / f for f in out.splitlines() if f.strip()]
 
 
+class DiffRefError(Exception):
+    """--diff was given a ref that doesn't resolve to a commit."""
+
+
+def _diff_ref_exists(ref: str) -> bool:
+    try:
+        subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+            cwd=REPO_ROOT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+    return True
+
+
 def get_diff_files(ref: str) -> list[Path]:
-    """Return paths modified vs. the given git ref."""
+    """Return paths modified vs. the given git ref.
+
+    Raises DiffRefError if `ref` does not resolve to a commit. An
+    unresolvable ref must fail loudly: NOT-APPLICABLE is reserved for a ref
+    that DOES resolve but has zero changed .py files, never for "couldn't
+    even figure out what you meant" — the two used to share the same
+    silent exit 0, which let a typo'd or renamed base ref report a clean
+    scan that never actually ran.
+    """
+    if not _diff_ref_exists(ref):
+        raise DiffRefError(f"--diff: {ref!r} is not a valid git ref")
     try:
         out = subprocess.check_output(
             ["git", "diff", f"{ref}...HEAD", "--name-only", "--diff-filter=ACMR"],
@@ -621,8 +656,8 @@ def get_diff_files(ref: str) -> list[Path]:
             stderr=subprocess.DEVNULL,
             text=True,
         )
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return []
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        raise DiffRefError(f"--diff: git diff against {ref!r} failed") from e
     return [REPO_ROOT / f for f in out.splitlines() if f.strip()]
 
 
@@ -727,7 +762,11 @@ def main(argv: list[str]) -> int:
     if args.all:
         roots = default_all_roots()
     elif args.diff:
-        roots = get_diff_files(args.diff)
+        try:
+            roots = get_diff_files(args.diff)
+        except DiffRefError as e:
+            print(f"check-windows-footguns: {e}", file=sys.stderr)
+            return 2
     elif args.paths:
         roots = [p.resolve() for p in args.paths]
     else:

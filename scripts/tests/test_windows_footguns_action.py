@@ -311,6 +311,19 @@ class WindowsFootgunsActionScript(unittest.TestCase):
 
 REAL_CHECKER = (REPO_ROOT / "scripts" / "check-windows-footguns.py").read_text(encoding="utf-8")
 
+# The checker exactly as it stood at the rejected parent commit (709fabb) —
+# i.e. BEFORE this card's F4 fix too. The reviewer's key evidence for F2
+# ("a diff adding a footgun in bad.py plus a file named --diff=HEAD.py made
+# the action step print NOT-APPLICABLE and exit 0") was gathered against
+# THIS checker: an unresolvable --diff ref silently reported zero files in
+# scope. F4 later makes an unresolvable ref fail loudly (exit 2) instead —
+# a real improvement, but a different signal — so reproducing the original
+# evidence needs the original checker, not today's doubly-patched one.
+OLD_CHECKER = subprocess.run(
+    ["git", "show", "709fabb:scripts/check-windows-footguns.py"],
+    cwd=REPO_ROOT, check=True, capture_output=True, text=True,
+).stdout
+
 # A real, unsuppressed footgun (no `# windows-footgun: ok`, no encoding=):
 # open() without an explicit encoding= on a text-mode call.
 FOOTGUN_LINE = 'x = open("data.txt")\n'
@@ -329,12 +342,15 @@ class WindowsFootgunsActionRealCheckerTests(unittest.TestCase):
         gh_workflows_root = self.tmp / "gh-workflows-checkout"
         self.action_path = gh_workflows_root / "actions" / "windows-footguns"
         self.action_path.mkdir(parents=True)
-        checker_dir = gh_workflows_root / "scripts"
-        checker_dir.mkdir(parents=True)
-        (checker_dir / "check-windows-footguns.py").write_text(REAL_CHECKER, encoding="utf-8")
+        self.checker_file = gh_workflows_root / "scripts" / "check-windows-footguns.py"
+        self.checker_file.parent.mkdir(parents=True)
+        self._use_checker(REAL_CHECKER)
         self.repo = self.tmp / "consumer-repo"
         self.repo.mkdir()
         _git(["init", "-q", str(self.repo)], cwd=self.tmp)
+
+    def _use_checker(self, src):
+        self.checker_file.write_text(src, encoding="utf-8")
 
     def _base(self, message="base"):
         sha = _commit(self.repo, message)
@@ -364,24 +380,28 @@ class WindowsFootgunsActionRealCheckerTests(unittest.TestCase):
     # -- the reviewer's key evidence -----------------------------------
 
     def test_diff_equals_filename_no_longer_hides_a_real_footgun(self):
-        """Red on 709fabb (the rejected parent commit, missing `--`): a
-        changed file named '--diff=HEAD.py' is consumed by the checker's
-        own --diff option — not the file list — silently replacing the
-        whole scan with get_diff_files("HEAD.py") (an unresolvable ref on
-        709fabb), which reports NOT-APPLICABLE and exits 0 while the real
-        footgun in bad.py is never scanned. Green on the current (fixed)
-        script: `--` keeps '--diff=HEAD.py' positional, bad.py is scanned,
-        and the step fails on the real footgun."""
+        """Red on 709fabb (the rejected parent commit, missing `--`), with
+        the checker AS IT STOOD THEN (before this card's F4 too — see
+        OLD_CHECKER): a changed file named '--diff=HEAD.py' is consumed by
+        the checker's own --diff option — not the file list — silently
+        replacing the whole scan with get_diff_files("HEAD.py") (an
+        unresolvable ref, silently empty on the old checker), which
+        reports NOT-APPLICABLE and exits 0 while the real footgun in
+        bad.py is never scanned. Green on the current (fixed) script and
+        checker: `--` keeps '--diff=HEAD.py' positional, bad.py is
+        scanned, and the step fails on the real footgun."""
         self._write("bad.py", "x = 1\n")
         self._base()
         self._write("bad.py", FOOTGUN_LINE)
         self._write("--diff=HEAD.py", "z = 1\n")
         self._head("introduce a footgun alongside a poison filename")
 
+        self._use_checker(OLD_CHECKER)
         old = self._run(_run_step_script_from_ref("709fabb"))
         self.assertEqual(old.returncode, 0, old.stdout + old.stderr)
         self.assertIn("NOT-APPLICABLE", old.stdout)
 
+        self._use_checker(REAL_CHECKER)
         new = self._run(_run_step_script())
         self.assertEqual(new.returncode, 1, new.stdout + new.stderr)
         self.assertIn("bad.py", new.stdout)
@@ -389,17 +409,20 @@ class WindowsFootgunsActionRealCheckerTests(unittest.TestCase):
 
     def test_diff_abbreviation_no_longer_hides_a_real_footgun(self):
         """Same exploit via argparse's prefix-abbreviation of --diff:
-        '--dif=x.py' resolves to the same --diff option."""
+        '--dif=x.py' resolves to the same --diff option. Uses OLD_CHECKER
+        for the red case for the same reason as above."""
         self._write("bad.py", "x = 1\n")
         self._base()
         self._write("bad.py", FOOTGUN_LINE)
         self._write("--dif=x.py", "z = 1\n")
         self._head("introduce a footgun alongside an abbreviated poison filename")
 
+        self._use_checker(OLD_CHECKER)
         old = self._run(_run_step_script_from_ref("709fabb"))
         self.assertEqual(old.returncode, 0, old.stdout + old.stderr)
         self.assertIn("NOT-APPLICABLE", old.stdout)
 
+        self._use_checker(REAL_CHECKER)
         new = self._run(_run_step_script())
         self.assertEqual(new.returncode, 1, new.stdout + new.stderr)
         self.assertIn("bad.py", new.stdout)
