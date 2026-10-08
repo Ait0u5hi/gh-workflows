@@ -40,16 +40,30 @@ runs:
         # d-filter has nothing to drop); -C (copy detection) is not enabled
         # — it's expensive, and a copy still shows up as a plain Added path
         # here, which is still scanned correctly.
-        FILES=()
+        #
+        # The NUL-delimited listing is written to a plain temp file and
+        # read back, never piped straight into the while-loop via process
+        # substitution (`< <(...)`). Process substitution runs the git
+        # command in a subshell whose exit status `set -e` never sees — a
+        # failing `git diff`/`git ls-files` (not a git repo, a corrupted
+        # checkout, a bad base ref) would silently produce no output, so
+        # FILES stayed empty and the step printed its own benign "No Python
+        # files to scan." and exited 0, indistinguishable from a real
+        # empty diff. Writing to a file first keeps the git command a
+        # plain simple command in the main shell, so `set -e` aborts the
+        # step the moment it fails.
+        FILE_LIST_DIR=$(mktemp -d)
+        FILE_LIST="${FILE_LIST_DIR}/changed-py-files.nul"
         if [ -n "$BASE" ]; then
-          while IFS= read -r -d '' f; do
-            FILES+=("$f")
-          done < <(git diff -z -M --diff-filter=d --name-only "${BASE}..HEAD" -- '*.py')
+          git diff -z -M --diff-filter=d --name-only "${BASE}..HEAD" -- '*.py' > "$FILE_LIST"
         else
-          while IFS= read -r -d '' f; do
-            FILES+=("$f")
-          done < <(git ls-files -z -- '*.py')
+          git ls-files -z -- '*.py' > "$FILE_LIST"
         fi
+        FILES=()
+        while IFS= read -r -d '' f; do
+          FILES+=("$f")
+        done < "$FILE_LIST"
+        rm -rf "$FILE_LIST_DIR"
 
         if [ "${#FILES[@]}" -eq 0 ]; then
           echo "No Python files to scan."

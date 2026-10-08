@@ -438,5 +438,57 @@ class WindowsFootgunsActionRealCheckerTests(unittest.TestCase):
     # way.
 
 
+class FailClosedGitListingTests(unittest.TestCase):
+    """F3: the step used to build FILES via `while read ... < <(git diff
+    ...)` process substitution, which runs the git command in a subshell
+    whose exit status `set -e` never observes — a failing `git diff` /
+    `git ls-files` (not a git repository, a corrupted checkout, ...) was
+    silently read as empty output, so FILES stayed empty and the step
+    printed its own benign 'No Python files to scan.' and exited 0,
+    indistinguishable from a genuinely empty diff."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        gh_workflows_root = self.tmp / "gh-workflows-checkout"
+        self.action_path = gh_workflows_root / "actions" / "windows-footguns"
+        self.action_path.mkdir(parents=True)
+        stub_dir = gh_workflows_root / "scripts"
+        stub_dir.mkdir(parents=True)
+        stub = stub_dir / "check-windows-footguns.py"
+        stub.write_text(STUB_CHECKER, encoding="utf-8")
+        stub.chmod(stub.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+        self.stub_log = self.tmp / "stub.log"
+        # Deliberately NOT a git repository: `git merge-base` / `git diff` /
+        # `git ls-files` must all fail here.
+        self.non_git_dir = self.tmp / "not-a-repo"
+        self.non_git_dir.mkdir()
+
+    def _run(self, run_script):
+        env = {
+            "PATH": "/usr/bin:/bin",
+            "BASE_REF": "main",
+            "GITHUB_ACTION_PATH": str(self.action_path),
+            "STUB_LOG": str(self.stub_log),
+            "STUB_EXIT": "1",  # would fail loudly if ever invoked
+        }
+        return subprocess.run(
+            ["bash", "-c", run_script], cwd=self.non_git_dir, env=env,
+            capture_output=True, text=True, timeout=30,
+        )
+
+    def test_old_script_masks_a_failing_git_listing_as_not_applicable(self):
+        proc = self._run(_run_step_script_from_ref("709fabb"))
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("No Python files to scan.", proc.stdout)
+        self.assertFalse(self.stub_log.exists())
+
+    def test_fixed_script_fails_closed_on_a_failing_git_listing(self):
+        proc = self._run(_run_step_script())
+        self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertNotIn("No Python files to scan.", proc.stdout)
+        self.assertFalse(self.stub_log.exists(), "checker ran despite a failed git listing")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
