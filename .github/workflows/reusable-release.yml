@@ -2,6 +2,18 @@
 # Trigger from the caller on push tags v*; uses the CALLER repo's cliff.toml.
 # Caller stub must grant: permissions: contents: write
 # Callers: see templates/python-plugin/release.yml
+#
+# Hardening notes:
+# - The tag name is attacker-shaped input (git allows `;`, `$`, `|`, `&`, `/`
+#   in ref names). It is validated first and only ever reaches a shell via
+#   env + quoting — never via a `${{ }}` expansion or a third-party action's
+#   unquoted `args:` (the reason git-cliff is installed directly below, pinned
+#   and SHA-256 verified, instead of through orhun/git-cliff-action).
+# - Release notes cover exactly <previous tag>..<this tag>, computed on a
+#   worktree of the tag — not on the default branch's HEAD, which may already
+#   contain later commits, and which is the wrong history for a backport tag.
+# - The GitHub Release is created (or updated, on a re-run) BEFORE the
+#   changelog push, so a rejected push can't leave a tag without a Release.
 name: Reusable Release
 
 on:
@@ -19,74 +31,121 @@ on:
         type: boolean
         default: false
 
-permissions:
-  contents: write
+permissions: {}
+
+# Two tags pushed together must not race each other's changelog push.
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: ${{ inputs.runs-on }}
     timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
+      - name: Validate the release tag
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            echo "::error::reusable-release must be triggered by a tag push (got ref type '${GITHUB_REF_TYPE}')"
+            exit 1
+          fi
+          # v1 / v1.2 / v1.2.3 / v1.2.3-rc.1 / v1.2.3+build.5 — nothing else.
+          # This excludes every shell metacharacter and sed's `/`, `&`, `\`.
+          if ! [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+(\.[0-9]+)*([-+][0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::refusing to release tag with unexpected characters; expected v<digits>[.<digits>...][-<pre>|+<build>]"
+            exit 1
+          fi
+
       # Credentials deliberately persisted: this job pushes the changelog
-      # commit back to main.
+      # commit back to the default branch.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # zizmor: ignore[artipacked] # v7.0.1
         with:
           ref: ${{ inputs.default-branch }}
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Generate release notes for this tag
-        uses: orhun/git-cliff-action@a9a95522b26fe6403f7bb24031f21fb573d0f5ff # v4
-        with:
-          config: cliff.toml
-          args: --latest --strip header
+      - name: Install git-cliff (pinned version + SHA-256 verified)
         env:
-          OUTPUT: RELEASE_NOTES.md
-
-      - name: Regenerate full CHANGELOG.md
-        uses: orhun/git-cliff-action@a9a95522b26fe6403f7bb24031f21fb573d0f5ff # v4
-        with:
-          config: cliff.toml
-          args: --tag ${{ github.ref_name }}
-        env:
-          OUTPUT: CHANGELOG.md
-
-      - name: Sync plugin.yaml version and commit back to the default branch
-        if: ${{ inputs.plugin-manifest }}
-        env:
-          DEFAULT_BRANCH: ${{ inputs.default-branch }}
+          # orhun/git-cliff v2.14.2, x86_64-unknown-linux-gnu (SHA-512 also
+          # matches the upstream .sha512 asset).
+          GIT_CLIFF_VERSION: "2.14.2"
+          GIT_CLIFF_SHA256: 24f397c733add5390fdceee3a2088588ab0d5f944ce00d34cb7029b888cf2db4
+          RUNNER_ARCH: ${{ runner.arch }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          sed -i -E "s/^version: \".*\"/version: \"${VERSION}\"/" plugin.yaml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add CHANGELOG.md plugin.yaml
-          if git diff --cached --quiet; then
-            echo "nothing to commit"
+          set -euo pipefail
+          if [ "$RUNNER_ARCH" != "X64" ]; then
+            echo "::error::git-cliff is pinned for runner.arch=X64 only; got '$RUNNER_ARCH'"
+            exit 1
+          fi
+          dir="$RUNNER_TEMP/git-cliff"
+          mkdir -p "$dir"
+          tarball="git-cliff-${GIT_CLIFF_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          curl -sSfL -o "$dir/$tarball" \
+            "https://github.com/orhun/git-cliff/releases/download/v${GIT_CLIFF_VERSION}/${tarball}"
+          (cd "$dir" && echo "${GIT_CLIFF_SHA256}  ${tarball}" | sha256sum -c - \
+            && tar -xzf "$tarball" --strip-components=1 "git-cliff-${GIT_CLIFF_VERSION}/git-cliff")
+          echo "$dir" >> "$GITHUB_PATH"
+
+      - name: Generate release notes for this tag
+        run: |
+          set -euo pipefail
+          tree="$RUNNER_TEMP/tag-tree"
+          git worktree add --detach "$tree" "refs/tags/${GITHUB_REF_NAME}"
+          prev=$(git -C "$tree" describe --tags --abbrev=0 --match 'v[0-9]*' 'HEAD^' 2>/dev/null || true)
+          if [ -n "$prev" ] && ! [[ "$prev" =~ ^v[0-9]+(\.[0-9]+)*([-+][0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::previous tag has unexpected characters; refusing to build a range from it"
+            exit 1
+          fi
+          range=()
+          if [ -n "$prev" ]; then
+            range=("${prev}..HEAD")
+          fi
+          (cd "$tree" && git-cliff --config "$GITHUB_WORKSPACE/cliff.toml" --strip header \
+            --output "$RUNNER_TEMP/RELEASE_NOTES.md" "${range[@]}")
+          git worktree remove --force "$tree"
+
+      - name: Create or update the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/RELEASE_NOTES.md"
           else
-            git commit -m "chore(release): ${GITHUB_REF_NAME} changelog + version sync [skip ci]"
-            git push origin "HEAD:${DEFAULT_BRANCH}"
+            gh release create "$GITHUB_REF_NAME" --verify-tag \
+              --title "$GITHUB_REF_NAME" \
+              --notes-file "$RUNNER_TEMP/RELEASE_NOTES.md"
           fi
 
-      - name: Commit CHANGELOG.md back to the default branch
-        if: ${{ !inputs.plugin-manifest }}
+      - name: Regenerate CHANGELOG.md and commit back to the default branch
         env:
           DEFAULT_BRANCH: ${{ inputs.default-branch }}
+          PLUGIN_MANIFEST: ${{ inputs.plugin-manifest }}
         run: |
+          set -euo pipefail
+          # A backport tag (not on the default branch) must not rewrite the
+          # default branch's changelog from its own, shorter history.
+          if ! git merge-base --is-ancestor "refs/tags/${GITHUB_REF_NAME}" HEAD; then
+            echo "::notice::${GITHUB_REF_NAME} is not on ${DEFAULT_BRANCH}; skipping the CHANGELOG commit"
+            exit 0
+          fi
+          # The tag already exists locally (fetch-tags), so git-cliff files its
+          # commits under it and anything newer on the branch as [unreleased].
+          git-cliff --config cliff.toml --output CHANGELOG.md
+          git add CHANGELOG.md
+          if [ "$PLUGIN_MANIFEST" = "true" ]; then
+            version="${GITHUB_REF_NAME#v}"   # charset validated in the first step
+            sed -i -E "s|^version: \".*\"|version: \"${version}\"|" plugin.yaml
+            git add plugin.yaml
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add CHANGELOG.md
           if git diff --cached --quiet; then
             echo "nothing to commit"
           else
             git commit -m "chore(release): ${GITHUB_REF_NAME} changelog [skip ci]"
             git push origin "HEAD:${DEFAULT_BRANCH}"
           fi
-
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" \
-            --notes-file RELEASE_NOTES.md
