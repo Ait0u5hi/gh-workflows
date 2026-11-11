@@ -9,6 +9,11 @@
 #                      the full history. For self-hosted runners: install a pinned,
 #                      checksum-verified release once; no marketplace action and no
 #                      license key needed.
+#
+# Config: by default gitleaks runs with its built-in rules from a config written
+# by this workflow, NOT the scanned repo's .gitleaks.toml - that file comes from
+# the PR under test, and an `[allowlist] paths = [".*"]` would let a PR
+# whitelist its own leak. Set use-repo-config: true to opt back in.
 name: Reusable Security
 
 on:
@@ -23,6 +28,18 @@ on:
           binary on the runner PATH).
         type: string
         default: action
+      use-repo-config:
+        description: >-
+          Let gitleaks load the scanned repo's own .gitleaks.toml. Off by default:
+          that file is PR-controlled, so a PR could allowlist its own secret.
+        type: boolean
+        default: false
+    secrets:
+      GITLEAKS_LICENSE:
+        description: >-
+          gitleaks-action license key; required by gitleaks-action when the repo
+          belongs to an organization. Pass it explicitly or via `secrets: inherit`.
+        required: false
 
 permissions:
   contents: read
@@ -50,10 +67,22 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Use gitleaks' built-in rules, not the PR's .gitleaks.toml
+        if: ${{ !inputs.use-repo-config }}
+        # Writes a fixed path (under RUNNER_TEMP) into GITHUB_ENV; nothing
+        # PR-controlled reaches it. gitleaks gives GITLEAKS_CONFIG precedence
+        # over a .gitleaks.toml in the scanned tree.
+        run: | # zizmor: ignore[github-env]
+          set -euo pipefail
+          cfg="$RUNNER_TEMP/gitleaks-default.toml"
+          printf '%s\n' 'title = "gh-workflows default (gitleaks built-in rules)"' '' '[extend]' 'useDefault = true' > "$cfg"
+          echo "GITLEAKS_CONFIG=$cfg" >> "$GITHUB_ENV"
+
       - if: ${{ inputs.scanner == 'action' }}
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
 
       - name: gitleaks (local binary, full history)
         if: ${{ inputs.scanner == 'local' }}
