@@ -136,8 +136,10 @@ if $have_file; then
   rg_args+=(--glob "!$PATTERNS_FILE")
 fi
 # read -a never globs; each glob is attached to its own --glob argument.
+# The ${a[@]+...} form keeps an empty list safe under `set -u` on bash 3.2.
+exclude_globs=()
 read -r -d '' -a exclude_globs <<<"$EXCLUDE_GLOBS" || true
-for g in "${exclude_globs[@]}"; do
+for g in ${exclude_globs[@]+"${exclude_globs[@]}"}; do
   rg_args+=(--glob "!$g")
 done
 if [ "$PCRE2" = "true" ]; then
