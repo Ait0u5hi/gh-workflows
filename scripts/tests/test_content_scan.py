@@ -427,6 +427,34 @@ class TestExclude(unittest.TestCase):
             r = t.run(exclude="tools/fake.py\nsrc/**")
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
+    def test_globs_reach_rg_unexpanded_by_the_shell(self):
+        # x.txt in the working directory must not make the shell expand
+        # `*.txt` to `x.txt`, which would leave sub/y.txt scanned.
+        with Tree(**{
+            ".github/content-scan-patterns.txt": "alpha\n",
+            "x.txt": "alpha\n",
+            "sub/y.txt": "alpha\n",
+        }) as t:
+            r = t.run(exclude="*.txt")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_leading_dot_slash_is_accepted(self):
+        with Tree(**{
+            ".github/content-scan-patterns.txt": "alpha\n",
+            "tools/fake.py": "alpha\n",
+        }) as t:
+            r = t.run(exclude="./tools/fake.py")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_leading_bang_is_refused_not_silently_ignored(self):
+        with Tree(**{
+            ".github/content-scan-patterns.txt": "alpha\n",
+            "tools/fake.py": "alpha\n",
+        }) as t:
+            r = t.run(exclude="!tools/fake.py")
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn("drop the leading '!'", r.stdout)
+
     def test_exclude_value_cannot_become_an_rg_option(self):
         with Tree(**{
             ".github/content-scan-patterns.txt": "alpha\n",

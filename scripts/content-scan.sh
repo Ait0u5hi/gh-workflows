@@ -17,7 +17,10 @@
 #                   intentionally; always passed to rg after `--`)
 #   EXCLUDE_GLOBS   whitespace-separated rg globs to leave out of the scan; each
 #                   becomes ONE `--glob '!<glob>'` argument (never word-split
-#                   further, never shell-globbed), so it can't inject options
+#                   further, never shell-globbed), so it can't inject options.
+#                   Write them without a leading `!` (refused) and relative to
+#                   the repo root; a leading `./` is stripped. rg does not apply
+#                   globs to a path named explicitly in SCAN_PATHS.
 #   REDACT          auto|true|false (default: auto — redact iff PATTERNS_SECRET is non-empty)
 #   PCRE2           true|false (default: false) — adds -P for lookaround patterns
 #   RG_BIN          ripgrep binary/path to use (default: rg, resolved from PATH)
@@ -140,7 +143,15 @@ fi
 exclude_globs=()
 read -r -d '' -a exclude_globs <<<"$EXCLUDE_GLOBS" || true
 for g in ${exclude_globs[@]+"${exclude_globs[@]}"}; do
-  rg_args+=(--glob "!$g")
+  # rg reads `!!x` as a literal `!`, so the old `-g !x` habit would exclude
+  # nothing, silently. Refuse it rather than scan with a no-op exclusion.
+  case "$g" in
+    '!'*)
+      echo "::error::exclude globs are already negated; drop the leading '!' from '$g'"
+      exit 1
+      ;;
+  esac
+  rg_args+=(--glob "!${g#./}") # rg globs never match a leading ./
 done
 if [ "$PCRE2" = "true" ]; then
   rg_args+=(-P)

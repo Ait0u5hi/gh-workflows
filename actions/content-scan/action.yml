@@ -29,7 +29,7 @@ inputs:
     required: false
     default: "."
   exclude:
-    description: Whitespace-separated ripgrep globs to exclude (each passed as --glob '!<glob>').
+    description: Whitespace-separated ripgrep globs to exclude (each passed as --glob '!<glob>'), relative to the repo root, without a leading '!'.
     required: false
     default: ""
   redact-matches:

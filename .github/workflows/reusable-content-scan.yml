@@ -54,6 +54,8 @@ on:
         description: >-
           Whitespace-separated ripgrep globs to leave out of the scan (each is
           passed as `--glob '!<glob>'`), e.g. "tools/pseudonymize.py docs/**/*.svg".
+          Relative to the repo root; no leading `!` (refused). Globs do not
+          apply to a path listed explicitly in `paths`.
       redact-matches:
         type: string
         default: auto
