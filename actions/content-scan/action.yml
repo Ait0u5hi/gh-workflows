@@ -69,12 +69,17 @@ runs:
             *) echo "::error::no pinned ripgrep release for architecture $(uname -m)"; exit 1 ;;
           esac
           mkdir -p "$HOME/.local/bin"
+          # Download and extract in a fresh temp dir, never in the checked-out
+          # PR tree: a PR could commit a symlink under the tarball's name and
+          # have curl write through it.
+          dl=$(mktemp -d "${RUNNER_TEMP:-/tmp}/rg.XXXXXX")
           tarball="ripgrep-${RG_VERSION}-${target}.tar.gz"
           url="https://github.com/BurntSushi/ripgrep/releases/download/${RG_VERSION}/${tarball}"
-          curl -sSfL -o "$tarball" "$url"
-          echo "${sha}  ${tarball}" | sha256sum -c -
-          tar -xzf "$tarball" --strip-components=1 "ripgrep-${RG_VERSION}-${target}/rg"
-          install -m 0755 rg "$HOME/.local/bin/rg"
+          curl -sSfL -o "$dl/$tarball" "$url"
+          (cd "$dl" && echo "${sha}  ${tarball}" | sha256sum -c - \
+            && tar -xzf "$tarball" --strip-components=1 "ripgrep-${RG_VERSION}-${target}/rg")
+          install -m 0755 "$dl/rg" "$HOME/.local/bin/rg"
+          rm -rf "$dl"
           # $GITHUB_PATH entries are prepended to PATH for later steps, so
           # this takes precedence over the system rg — but the scan step
           # below is also handed the exact path via RG_BIN, rather than
