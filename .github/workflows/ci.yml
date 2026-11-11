@@ -39,7 +39,8 @@ jobs:
       # yamllint + zizmor (and pyyaml) come from a hash-locked requirements
       # file: pip refuses any file whose hash isn't in the lock.
       - name: Install lint tools (hash-locked)
-        run: pip install --quiet --require-hashes --only-binary :all: -r requirements/ci.txt
+        run: |
+          pip install --quiet --require-hashes --only-binary :all: -r requirements/ci.txt
       - name: yamllint
         run: yamllint .
       - name: zizmor (workflow security audit)
@@ -91,7 +92,8 @@ jobs:
       # test_sync_labels and test_pr_title_pattern read YAML; setup-python's
       # interpreter has no PyYAML.
       - name: Install PyYAML (pinned)
-        run: pip install --quiet --require-hashes --only-binary :all: -r requirements/ci.txt
+        run: |
+          pip install --quiet --require-hashes --only-binary :all: -r requirements/ci.txt
       # Every test must run: a skip here means a prerequisite went missing.
       - name: unittest (scripts/tests)
         env:
