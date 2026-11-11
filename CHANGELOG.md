@@ -4,6 +4,14 @@ All notable changes to this repo are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are the moving major
 tags callers pin (`@v2`). See [README → Versioning](README.md#versioning).
 
+## [Unreleased]
+
+### Changed
+- Docs: this repo's `main` and `v*` tags are now protected by rulesets
+  (required CI + PR Governance checks, squash-only PRs, no force-push or
+  deletion; admin-only tag changes). README Security model / Versioning and
+  CONTRIBUTION-STANDARD §9 describe the enforcement as it now is.
+
 ## [v2] — 2026-11-11
 
 `v1` is frozen at `b43f688` and gets no backports. Everything below is new
@@ -258,7 +266,7 @@ What `@v1` callers currently run.
   `python-ruff-config`, `yaml-config` (defaults unchanged).
 - `reusable-release.yml` input: `default-branch` (default `main`).
 - `docs/marketplace-research.md`; `branding:` metadata on `retry` and
-  `detect-changes` (later `content-scan`; `windows-footguns` in Unreleased).
+  `detect-changes` (later `content-scan`; `windows-footguns` in v2).
 - `reusable-content-scan.yml`: optional `secrets: patterns:` merged with the committed
   patterns file (either alone now satisfies the "at least one pattern source" check);
   findings redact to `path:line` (never the matched text) whenever the secret is in
@@ -281,7 +289,7 @@ What `@v1` callers currently run.
   than relying solely on `$GITHUB_PATH` ordering.
 - `reusable-release.yml` no longer hardcodes `main` for checkout/push-back.
 - `reusable-codeql.yml` `continue-on-error` narrowed from the whole job to the
-  analyze step (it was still too wide — see Unreleased → Security).
+  analyze step (it was still too wide — see v2 → Security).
 - `reusable-python-validation.yml` meta-lint pins the actionlint installer SHA +
   tool versions (was unpinned `curl|bash` + floating pip installs).
 - `reusable-crossplatform-lint.yml` dropped the dead `gh-workflows-ref` input;

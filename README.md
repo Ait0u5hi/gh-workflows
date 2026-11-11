@@ -242,7 +242,8 @@ included; see the [v1 → v2 migration notes](CHANGELOG.md#v2--2026-11-11).
 
 Because `v2` moves, protect it: a tag ruleset on `v*` (no deletion, no
 force-push except by maintainers) keeps a compromised token from swapping the
-code every caller runs. Callers who need immutability can pin a commit SHA
+code every caller runs. This repo has one (`release tags`: creating, moving,
+deleting or force-pushing a `v*` tag is restricted to repository admins). Callers who need immutability can pin a commit SHA
 instead of `@v2`: since v2 the reusables reach their own composite actions
 (`uses: $/...`) and scripts (`job.workflow_sha`) at that same commit, so a SHA
 pin now covers everything the workflow runs.
@@ -253,7 +254,11 @@ pin now covers everything the workflow runs.
   GitHub uses the workflow definitions from the PR's merge commit, so a PR can
   edit the very checks that judge it. They only block anything once the
   default branch requires them (a ruleset with required status checks) and
-  changes to `.github/workflows/` need review.
+  changes to `.github/workflows/` need review. In this repo the `main`
+  ruleset requires a pull request (squash only), forbids force-pushes and
+  deletion, and requires the seven CI + PR Governance checks; a PR that
+  rewrites one of those checks still has to get past review of its
+  `.github/workflows/` diff.
 - **The scanned tree is hostile.** Checks treat PR content (file names,
   symlinks, ignore files, config files like `.gitleaks.toml`) as attacker
   input: they refuse symlinks out of the workspace, ignore PR-supplied

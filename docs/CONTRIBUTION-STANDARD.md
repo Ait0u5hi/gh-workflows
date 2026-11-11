@@ -141,9 +141,11 @@ Instead:
 
 Being straight about this, because pretending otherwise is the failure mode §8 warns about.
 
-- **`gh-workflows` is public**, so rulesets with required status checks are available to it — but
-  a check only blocks a merge once a ruleset actually requires it. As of 2026-11 none does: its
-  checks run and report, and are advisory until that setting is turned on.
+- **`gh-workflows` is public**, so rulesets are available to it, and since 2026-11-11 they are on:
+  `main` requires a squash-merged pull request whose CI and PR Governance checks (meta-lint,
+  unit-tests, contributor-check, crossplatform-lint, repo-docs, pr-title, doc-commands) pass,
+  with no bypass, and `v*` tags can only be created, moved or deleted by a repository admin. A red
+  check there genuinely blocks the merge.
 - **Private repos on a free plan** can't use branch protection or rulesets at all
   (`403 Upgrade to GitHub Pro or make this repository public`). Their checks run and report, but
   **nothing stops a merge past a red check**. Treat them as advisory.
