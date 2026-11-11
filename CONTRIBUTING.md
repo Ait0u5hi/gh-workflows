@@ -24,11 +24,31 @@ duplicates are common and a minute up front keeps the queue clean.
 4. **Pin third-party actions by commit SHA** (with a `# vX.Y.Z` comment), never a
    moving tag. Reusables in *this* repo may be referenced by callers as `@main`
    (always-current) or `@v1` (stable).
-5. **`actionlint` clean.** Run `./actionlint` (vendored) before pushing.
+5. **Lint and test clean.** CI (`.github/workflows/ci.yml`) runs exactly the checks below,
+   at pinned versions; run them before pushing. actionlint is not vendored (it's gitignored) —
+   fetch the pinned release with its installer, pinned by commit SHA:
+   ```bash
+   bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/914e7df21a07ef503a81201c76d2b11c789d3fca/scripts/download-actionlint.bash) 1.7.12
+   ./actionlint -color
+   pip install yamllint==1.38.0 zizmor==1.32.0 pyyaml==6.0.3
+   yamllint .
+   zizmor --no-online-audits .github/workflows/ actions/
+   python3 -m unittest discover -s scripts/tests -t scripts/tests
+   ```
+   The content-scan tests need a ripgrep built with PCRE2 (`rg --pcre2-version`); point `RG_BIN`
+   at one if your distro's isn't. CI treats any skipped test as a failure.
+6. **Treat PR content as hostile.** Anything a check reads from the tree under test (file names,
+   symlinks, ignore/config files, commit metadata) is attacker-controlled: never echo it outside a
+   `::stop-commands::` window, never pass it to a tool without `--`, never follow a symlink out of
+   the workspace, and never interpolate `${{ }}` into a `run:` script — go through `env:`. Each
+   hardening fix lands with a test that fails without it.
+7. **A template pin moves with its workflow pin.** Dependabot only updates `.github/workflows/`;
+   `scripts/tests/test_action_pins.py` fails if the same action is pinned to different SHAs in a
+   workflow and a `templates/` stub.
 
 ## Governance this repo provides (and dogfoods)
 
-Four reusable checks, wired into new repos via `templates/pr-governance.yml`:
+Five reusable checks, wired into new repos via `templates/pr-governance.yml`:
 
 - **Contributor Attribution Check** (`.github/workflows/reusable-contributor-check.yml`)
   — fails a PR whose commit author emails aren't mapped under
@@ -36,7 +56,8 @@ Four reusable checks, wired into new repos via `templates/pr-governance.yml`:
   ```bash
   python3 scripts/add_contributor.py <your-git-email> <your-github-login>
   ```
-  Bot emails (github-actions, dependabot, `+…@users.noreply.github.com`) auto-resolve.
+  GitHub `id+login@users.noreply.github.com` addresses (including dependabot and github-actions)
+  and a few exact bot addresses auto-resolve. Merge commits are checked too.
 - **Cross-platform lint** (`.github/workflows/reusable-crossplatform-lint.yml`)
   — scans changed Python for Windows footguns (bare `os.killpg`, `signal.SIGKILL`,
   `os.fork`, hardcoded `/tmp`, …) with `scripts/check-windows-footguns.py`.
@@ -49,6 +70,10 @@ Four reusable checks, wired into new repos via `templates/pr-governance.yml`:
   Run it locally with `python3 scripts/check-repo-docs.py <repo>`; unit tests in `scripts/tests/`.
 - **Conventional-Commit PR title** (`.github/workflows/reusable-pr-title.yml`) — see the soundness
   note in that file: it only guarantees the landed subject if the repo squash-merges.
+- **Documented commands** (`.github/workflows/reusable-doc-commands.yml`) — statically validates
+  the `gh`/`git` commands in fenced shell blocks of the given docs (e.g. `gh search prs --state`
+  accepts only `open|closed`). Executes nothing. Run it locally with
+  `python3 scripts/check-doc-commands.py CONTRIBUTING.md`.
 
 ## Adopt the governance in another repo
 
@@ -64,15 +89,18 @@ Four reusable checks, wired into new repos via `templates/pr-governance.yml`:
    python3 scripts/check-repo-docs.py /path/to/repo
    ```
    Adopting gradually? `repo-docs` takes a `skip` input so you can land the docs one at a time.
-5. Make the PR-title check mean something by disabling non-squash merges, so the title you lint is
-   the subject that actually lands:
+5. Make the PR-title check mean something: disable non-squash merges and make the squash subject
+   the PR title (by default a single-commit PR lands its *commit* subject instead):
    ```bash
-   gh api -X PATCH repos/Ait0u5hi/<repo> -F allow_merge_commit=false -F allow_rebase_merge=false
+   gh api -X PATCH repos/Ait0u5hi/<repo> -F allow_merge_commit=false -F allow_rebase_merge=false -f squash_merge_commit_title=PR_TITLE
    ```
+6. Make the checks blocking: add a ruleset on the default branch that requires the PR Governance
+   checks. Without it every check is advisory — and a PR can edit the workflow that checks it.
 
 ## PR checklist
 
-See `.github/PULL_REQUEST_TEMPLATE.md` — it's enforced by the governance workflow.
+See `.github/PULL_REQUEST_TEMPLATE.md`. The governance workflow checks that the template exists;
+filling it in honestly is on you and your reviewer.
 
 ## Attribution
 

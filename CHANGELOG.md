@@ -6,7 +6,93 @@ tags callers pin (`@v1`). See [README → Versioning](README.md#versioning).
 
 ## [Unreleased]
 
+Not yet in `v1`: `@v1` callers get these only once `v1` is retagged. Several
+items below change behavior (marked **behavior change**) — see the
+[README → Versioning](README.md#versioning) rule before deciding between a
+`v1` retag and a `v2` tag.
+
+### Security
+- `reusable-release.yml`: the tag name reached a shell unquoted through
+  git-cliff-action's `run: … ${{ inputs.args }}` and through the plugin.yaml
+  `sed`, in a job holding `contents: write` + persisted credentials. Tags are
+  now validated (`v1`, `v1.2.3`, `v1.2.3-rc.1`, `v1.2.3+build.5`) before
+  anything else runs, and git-cliff 2.14.2 is installed directly (pinned +
+  SHA-256 verified) instead of via the action, whose installer downloads the
+  binary unverified. **Behavior change:** other tag shapes are refused.
+- `reusable-release.yml`: release notes are `<previous tag>..<this tag>` on a
+  worktree of the tag (was `--latest` on the default branch's HEAD, which
+  published the wrong notes for backport tags and filed post-tag commits under
+  the release); the GitHub Release is created/updated before the changelog
+  push; backport tags skip the changelog commit; `permissions: {}` at the top,
+  `contents: write` on the job; a concurrency group serialises releases.
+- `scripts/content-scan.sh` / `actions/content-scan`: a symlinked patterns file
+  was read and echoed (e.g. a runner credential); `.gitignore`/`.ignore`/
+  `.rgignore` entries or a leading NUL byte hid files from the scan; a regex
+  error echoed the secret patterns; with a glob in `paths`, a PR file named
+  `--pre=bash` made rg execute PR content; PR-controlled output could forge
+  workflow commands. All fixed and regression-tested. **Behavior change:**
+  zero active patterns now fails instead of passing, binary/ignored files are
+  now scanned, and committed patterns are counted rather than printed.
+- `reusable-contributor-check.yml`: substring exemptions
+  (`x@anthropic.com.evil.io`), an unanchored noreply regex, a path-shaped email
+  (`../../LICENSE`) and `--no-merges` each let an unmapped author through; names
+  could forge workflow commands via `echo -e`. **Behavior change:** exemptions
+  are exact addresses and merge commits are checked.
+- `actions/detect-changes`: git-quoted file names (non-ASCII, `"`, `\`, tab)
+  matched no lane, so gated jobs were skipped (and a skipped job satisfies a
+  required check). Now NUL-delimited and unquoted.
+- `reusable-security.yml`: gitleaks loaded the PR's own `.gitleaks.toml`, so a
+  PR could allowlist its own leak. **Behavior change:** it now runs gitleaks'
+  built-in rules unless `use-repo-config: true`. `GITLEAKS_LICENSE` is now a
+  declared (optional) secret that actually reaches gitleaks-action.
+- `reusable-codeql.yml`: `continue-on-error` hid every analysis failure;
+  analysis is now fatal and only the separate SARIF upload is tolerated.
+- `reusable-repo-docs.yml` / `reusable-doc-commands.yml`: `tools-ref` defaults
+  to `refs/tags/v1` (a bare `v1` resolves a branch named `v1` first).
+- `scripts/check-repo-docs.py`: a directory or a symlink (e.g. to `/dev/null`)
+  satisfied "presence". `scripts/check-doc-commands.py`: a non-shell fence
+  before a bash block hid it; `~~~`, info strings, CRLF, `--state=all`, `-s`
+  and repeated flags were missed.
+- `reusable-osv.yml` removes PR-committed report files before scanning;
+  `reusable-link-check.yml` and `actions/content-scan` download tools outside
+  the PR tree; `actions/retry` uses a random `GITHUB_OUTPUT` delimiter.
+- `label.yml`: top-level `permissions: {}`, timeout, concurrency.
+
+### Changed
+- **Behavior change (defaults):** `reusable-python-eval` /
+  `reusable-python-validation` `python-version` `3.10` → `3.12`;
+  `reusable-python-ci` `python-versions` → `["3.11","3.12","3.13","3.14"]`;
+  `reusable-node-ci` `node-versions` → `["22","24"]` (Python 3.10 and Node 20
+  are end-of-life). Callers that pass their own versions are unaffected.
+- **Behavior change:** `reusable-link-check.yml`'s default
+  `--no-progress './**/*.md'` reached lychee with its quotes intact, so it
+  checked 0 links and passed. The default is now `--no-progress ./**/*.md` and
+  quotes in `args` are stripped — callers on the default will start seeing real
+  broken links.
+- `scripts/check-doc-commands.py` warns (does not fail) when a doc has no
+  `gh`/`git` commands.
+- Templates: `actions/labeler` v5 → v7.0.0 and `actions/stale` v9 → v11.0.0
+  (both were node20); full `# vX.Y.Z` pin comments; a test keeps one SHA per
+  action across workflows, templates and actions.
+- Self-CI: zizmor 1.26.1 → 1.32.0, now also auditing `actions/`; pr-governance
+  re-runs on PR title edits (matching the template) with a concurrency group.
+- Docs: README catalog completed (repo-docs, doc-commands, every input), new
+  Security model and Docs sections; CONTRIBUTING gains the local lint/test
+  commands; `docs/marketplace-research.md` refreshed; `actions/windows-footguns`
+  gains `branding:`; `docs/starter-workflows-notes.md` folded into the README
+  and removed.
+
 ### Fixed
+- `scripts/check-windows-footguns.py`: the `open()` mode is decided by a
+  balanced-paren scan (#42); zero Python files in scope reports
+  `NOT-APPLICABLE` rather than a pass (#45); `/proc` and `/sys` `open()`
+  literals are skipped, and `--all` scans the git toplevel.
+- `scripts/sync_labels.py`: existing labels match case-insensitively and
+  case-only differences are reported (#34).
+- `reusable-python-validation.yml` installs a pinned `pyyaml==6.0.3`.
+- `ci.yml` runs the `scripts/tests` suite with a pinned PCRE2 ripgrep and
+  fails on any skipped test.
+- Dependabot bumps of the codeql, osv and release pins.
 - `actions/windows-footguns`: the diff step now builds its file list
   NUL-delimited into a bash array (a path with a space used to get
   word-split by `tr '\n' ' '` into two bogus argv entries) and with
@@ -83,7 +169,17 @@ tags callers pin (`@v1`). See [README → Versioning](README.md#versioning).
   `::notice::` (merge-base fallback) is emitted before the window opens and
   stays a real command.
 
+## [v1] — retagged 2026-09-27 (`b43f688`)
+
+What `@v1` callers currently run.
+
 ### Added
+- New reusables (2026-08-20): `reusable-go-ci`, `reusable-pr-title`,
+  `reusable-dependency-review`, `reusable-spellcheck`, `reusable-link-check`,
+  `reusable-content-scan`; `upload-coverage` in `reusable-python-ci`.
+- Contribution governance (2026-09-05): `reusable-repo-docs`,
+  `reusable-doc-commands`, `docs/CONTRIBUTION-STANDARD.md` and the doc templates
+  under `templates/`.
 - `labels.yml` + `scripts/sync_labels.py`: the shared issue-label taxonomy
   (`type:bug|friction|gap|debt|flaky`, `source:agent|human`, `status:carded`) and an
   idempotent, dry-run-by-default script that applies it to the repos you name. It never
@@ -93,7 +189,8 @@ tags callers pin (`@v1`). See [README → Versioning](README.md#versioning).
 - `reusable-deep-lint.yml` inputs: `default-branch`, `linter-rules-path`,
   `python-ruff-config`, `yaml-config` (defaults unchanged).
 - `reusable-release.yml` input: `default-branch` (default `main`).
-- `docs/marketplace-research.md`; `branding:` metadata on the composite actions.
+- `docs/marketplace-research.md`; `branding:` metadata on `retry` and
+  `detect-changes` (later `content-scan`; `windows-footguns` in Unreleased).
 - `reusable-content-scan.yml`: optional `secrets: patterns:` merged with the committed
   patterns file (either alone now satisfies the "at least one pattern source" check);
   findings redact to `path:line` (never the matched text) whenever the secret is in
@@ -115,16 +212,16 @@ tags callers pin (`@v1`). See [README → Versioning](README.md#versioning).
   and the scan step now receives the exact binary to use via an `RG_BIN` env var rather
   than relying solely on `$GITHUB_PATH` ordering.
 - `reusable-release.yml` no longer hardcodes `main` for checkout/push-back.
-- `reusable-codeql.yml` `continue-on-error` narrowed to the SARIF-upload step so
-  genuine CodeQL misconfig fails the job again.
+- `reusable-codeql.yml` `continue-on-error` narrowed from the whole job to the
+  analyze step (it was still too wide — see Unreleased → Security).
 - `reusable-python-validation.yml` meta-lint pins the actionlint installer SHA +
   tool versions (was unpinned `curl|bash` + floating pip installs).
 - `reusable-crossplatform-lint.yml` dropped the dead `gh-workflows-ref` input;
   refreshed stale private-repo framing across several workflows/docs.
 
-## [v1] — baseline
+## [v1] — baseline (2026-07-08)
 
 Central reusable workflows + composite actions: generic Python/Node CI, CodeQL,
-OSV, gitleaks, content-scan, deep-lint, release; org-governance reusables
+OSV, gitleaks, deep-lint, release; org-governance reusables
 (python-validation, contributor-check, crossplatform-lint); composite actions
 `retry`, `detect-changes`, `windows-footguns`. See the README for the full set.

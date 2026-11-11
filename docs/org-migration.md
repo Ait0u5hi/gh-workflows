@@ -1,13 +1,14 @@
-# Org migration: native starter-workflow picker
+# Org migration: native workflow-template picker
 
-**Status: future / not yet done.** This documents how to surface these workflows
-in GitHub's native *Actions → New workflow* starter picker. It is a "stub now,
+**Status: future / not yet done** (last reviewed 2026-11-11). This documents how
+to surface these workflows in GitHub's native *Actions → New workflow* picker.
+GitHub now calls these **workflow templates** (formerly "starter workflows"). It is a "stub now,
 org later" plan — today the library ships via the copy-a-stub + reusable
 `workflow_call` model, which is all a personal account can do.
 
 ## The constraint (why this is deferred)
 
-GitHub's **custom starter workflows** (the recommended templates shown in the
+GitHub's **custom workflow templates** (the recommended templates shown in the
 *New workflow* UI, with language auto-suggestion) are an **Organization-only**
 feature. They require:
 
@@ -30,8 +31,12 @@ In `<org>/.github`:
 workflow-templates/
   python-ci.yml            + python-ci.properties.json
   node-ci.yml              + node-ci.properties.json
+  go-ci.yml                + go-ci.properties.json
   codeql.yml               + codeql.properties.json
 ```
+
+(Add the other generic stubs — osv, dependency-review, pr-title, spellcheck,
+link-check — the same way if you want them in the picker.)
 
 Each `workflow-templates/<name>.yml` is a **thin caller** into the reusables in
 this repo — the same body as the `templates/` stubs, but using GitHub's
@@ -77,13 +82,23 @@ root files that gate/suggest the template).
    tag there.
 3. Create the `<org>/.github` repo; add `workflow-templates/` with a `<name>.yml`
    + `<name>.properties.json` pair per generic template (Python CI, Node CI,
-   CodeQL). Point each `uses:` at `<org>/gh-workflows/...@v1`.
-4. Bulk-update caller `uses:` refs in consumer repos from `Ait0u5hi/*` to
+   Go CI, CodeQL). Point each `uses:` at `<org>/gh-workflows/...@v1`.
+4. Repoint the self-references **inside this repo**, then retag `v1`:
+   - `uses: Ait0u5hi/gh-workflows/actions/…@v1` in `reusable-content-scan.yml`
+     and `reusable-crossplatform-lint.yml`;
+   - `repository: Ait0u5hi/gh-workflows` in `reusable-repo-docs.yml` and
+     `reusable-doc-commands.yml`;
+   - the links in `scripts/check-repo-docs.py`, `CONTRIBUTING.md`,
+     `templates/CONTRIBUTING.md`, and every `uses:` in `templates/`.
+   `rg -uu 'Ait0u5hi/' --glob '!.git'` lists what's left.
+5. Bulk-update caller `uses:` refs in consumer repos from `Ait0u5hi/*` to
    `<org>/*`.
-5. Update the zizmor policy key in `templates/zizmor.yml` (and any `.github/zizmor.yml`)
+6. Update the zizmor policy key in `templates/zizmor.yml` (and any `.github/zizmor.yml`)
    from `Ait0u5hi/*: ref-pin` to `<org>/*: ref-pin`.
-6. Org setting: *Settings → Actions → General → Access* so consumer repos can
+7. Org setting: *Settings → Actions → General → Access* so consumer repos can
    resolve the reusables.
+8. Add org rulesets: require the PR Governance checks on default branches, and
+   protect `v*` tags in `<org>/gh-workflows` from deletion and force-push.
 
 CodeQL note: on an org you *may* have GitHub Advanced Security available (paid),
 which would let the CodeQL templates report on private repos too — at which point

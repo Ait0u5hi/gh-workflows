@@ -1,4 +1,5 @@
-<!-- Copy to <your-repo>/CODE_OF_CONDUCT.md. Adapted from Contributor Covenant v2.1. -->
+<!-- Copy to <your-repo>/CODE_OF_CONDUCT.md and fill the {{PLACEHOLDERS}} ({{CONTACT_EMAIL}}).
+Adapted from Contributor Covenant v2.1. -->
 # Contributor Covenant Code of Conduct
 
 ## Our pledge

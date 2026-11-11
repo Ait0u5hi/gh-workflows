@@ -29,8 +29,8 @@ it, unless the project is specifically supposed to defend that boundary.
 
 | Version | Supported |
 |---|---|
-| 1.x | yes |
-| older | no |
+| `v1` (moving tag; latest `main` when retagged) | yes |
+| anything older, or a pinned SHA behind `v1` | no — update to `v1` |
 
 ## Handling of secrets
 
