@@ -31,6 +31,12 @@ name: Reusable Content Scan
 on:
   workflow_call:
     inputs:
+      allow-untrusted-prs-on-self-hosted:
+        description: >-
+          Allow this job to run code from a fork (or another repository's) PR when
+          runs-on is a self-hosted runner. Only safe on ephemeral, single-use runners.
+        type: boolean
+        default: false
       runs-on:
         type: string
         default: ubuntu-latest
@@ -70,11 +76,44 @@ jobs:
     runs-on: ${{ inputs.runs-on }}
     timeout-minutes: 5
     steps:
+      - name: Refuse untrusted PR code on a self-hosted runner
+        # Misconfiguration guard, NOT a security boundary: on pull_request the
+        # PR author controls the calling workflow and can drop this call. The
+        # controls that actually stop it are repo/org settings (README ->
+        # Security model). Runs before checkout, so no PR code has run yet.
+        if: ${{ runner.environment == 'self-hosted' && !inputs.allow-untrusted-prs-on-self-hosted }}
+        # bash explicitly (a Windows runner defaults to pwsh); written for
+        # bash 3.2 too (macOS), so no ${var,,}.
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || github.event.workflow_run.head_repository.full_name }}
+          THIS_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            pull_request* | workflow_run)
+              # A deleted head repo gives an empty HEAD_REPO: treated as foreign.
+              head=$(printf '%s' "$HEAD_REPO" | tr '[:upper:]' '[:lower:]')
+              this=$(printf '%s' "$THIS_REPO" | tr '[:upper:]' '[:lower:]')
+              if [ "$head" != "$this" ]; then
+                echo "::error::refusing PR code from ${HEAD_REPO:-a deleted repo} on a self-hosted runner"
+                echo "Use ephemeral runners and set allow-untrusted-prs-on-self-hosted to opt in."
+                exit 1
+              fi
+              ;;
+            issue_comment)
+              echo "::error::refusing comment-triggered PR code on a self-hosted runner"
+              exit 1
+              ;;
+          esac
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: Ait0u5hi/gh-workflows/actions/content-scan@v1  # zizmor: ignore[unpinned-uses]
+      # `$/` = this repository at the commit this reusable workflow runs from,
+      # so the action always matches the caller's pin of this workflow.
+      - uses: $/actions/content-scan
         with:
           patterns-file: ${{ inputs.patterns-file }}
           patterns-secret: ${{ secrets.patterns }}

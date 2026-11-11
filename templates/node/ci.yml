@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   ci:
-    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-node-ci.yml@v1
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-node-ci.yml@v2
     with:
       # Single version (legacy): keep node-version set for one job.
       node-version: "22"

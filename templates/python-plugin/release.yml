@@ -11,6 +11,6 @@ permissions:
 
 jobs:
   release:
-    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-release.yml@v1
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-release.yml@v2
     with:
       plugin-manifest: true

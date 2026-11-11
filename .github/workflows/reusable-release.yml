@@ -167,5 +167,6 @@ jobs:
             git fetch --quiet origin "${DEFAULT_BRANCH}"
             git reset --quiet --hard "origin/${DEFAULT_BRANCH}"
           done
-          echo "::error::could not push the changelog to ${DEFAULT_BRANCH} after 3 attempts (the GitHub Release itself was created)"
+          echo "::error::could not push the changelog to ${DEFAULT_BRANCH} after 3 attempts"
+          echo "(the GitHub Release itself was created)"
           exit 1

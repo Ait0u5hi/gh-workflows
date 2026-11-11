@@ -18,4 +18,4 @@ permissions:
 
 jobs:
   security:
-    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-security.yml@v1
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-security.yml@v2

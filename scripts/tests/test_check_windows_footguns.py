@@ -196,12 +196,11 @@ class SelfLintTests(unittest.TestCase):
     redden that gate silently again. This is the test the gate itself
     would run, not a hand-picked excerpt.
 
-    Note this governance gate pins the composite action (and so the
-    checker it runs) to a tagged release (see FixtureNotPythonTests
-    below), not this repo's own HEAD. An EXCLUDED_FILES entry added here
-    would never reach that pinned checker, so the fixture is kept out of
-    scope by its file extension instead (see FixtureNotPythonTests);
-    nothing in EXCLUDED_FILES needs to name it."""
+    Since v2 the governance gate reaches the composite action with
+    `uses: $/actions/windows-footguns`, i.e. at the PR's own commit, so it
+    runs THIS checker. The fixture is still kept out of scope by its file
+    extension (see FixtureNotPythonTests) so no checker version, old or new,
+    ever scans it."""
 
     REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -212,20 +211,15 @@ class SelfLintTests(unittest.TestCase):
 
 
 class FixtureNotPythonTests(unittest.TestCase):
-    """N1: the governance gate (.github/workflows/pr-governance.yml ->
-    reusable-crossplatform-lint.yml) runs the windows-footguns composite
-    action at a pinned tag (e.g. @v1), which fetches the checker script
-    AT THAT TAG, not this repo's HEAD. A fix to check-windows-footguns.py
-    (an EXCLUDED_FILES entry, say) only reaches CI after the tag is
-    re-cut, which is not this card's call to make. The only fix that
-    works regardless of which tagged checker version runs is to keep the
-    vendored 709fabb fixture out of scope by construction: every checker
-    version (old and new alike) only looks at `*.py`/`*.pyw`/`*.pyi`
-    files (see should_scan_file), so a fixture with any other extension
-    is never scanned by any of them. The fixture was renamed to
-    check_windows_footguns_709fabb.py.txt for exactly this reason; this
-    test fails loudly if a future vendored fixture is ever added back
-    under a `.py` name."""
+    """N1: keep vendored fixtures out of the checker's scope by construction.
+    Every checker version (old and new alike) only looks at
+    `*.py`/`*.pyw`/`*.pyi` files (see should_scan_file), so a fixture with any
+    other extension is never scanned by any of them — including the
+    pre-v2 releases whose governance gate ran a tagged checker rather than
+    the PR's own. The vendored 709fabb fixture was renamed to
+    check_windows_footguns_709fabb.py.txt for exactly this reason; this test
+    fails loudly if a future vendored fixture is added back under a `.py`
+    name."""
 
     FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 
@@ -245,11 +239,11 @@ class FixtureNotPythonTests(unittest.TestCase):
 
 
 class SuppressionMarkerScopeTests(unittest.TestCase):
-    """(b): confirm the existing `# windows-footgun: ok` marker's semantics
-    before relying on it for N1. It is checked per LINE (SUPPRESS_MARKER
-    is tested inside the per-line loop in scan_file), not per file and not
-    for a following block. A second, unmarked line with the same footgun
-    right after a suppressed one must still be flagged."""
+    """The `# windows-footgun: ok` marker covers the STATEMENT whose comment
+    carries it (every row of a multi-line statement; see
+    TokenizerMaskTests.test_marker_covers_a_multi_line_statement), never
+    the file or a following block: a second, unmarked statement with the
+    same footgun right after a suppressed one must still be flagged."""
 
     def test_marker_suppresses_only_its_own_line(self):
         # "os." and "killpg(" are concatenated at runtime, never adjacent
@@ -305,6 +299,197 @@ class SeparatorHandlingTests(unittest.TestCase):
             proc = run_script(["--"], Path(tmp))
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
             self.assertIn("No staged files to scan", proc.stdout + proc.stderr)
+
+
+
+# Footgun spellings are assembled at runtime (never adjacent in this file's
+# own source) so SelfLintTests, which scans this file, stays clean.
+KILLPG = "os." + "killpg(1, 2)"
+DESKTOP = "~/" + "Desktop"
+
+
+class TokenizerMaskTests(unittest.TestCase):
+    """The scanner masks comments and docstrings with the tokenizer instead
+    of a line-based triple-quote counter, which one stray `\"\"\"` in a
+    comment or a string used to desynchronise for the rest of the file."""
+
+    def scan(self, source: str, name: str = "mod.py") -> subprocess.CompletedProcess:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / name).write_text(source, encoding="utf-8", newline="")
+            return run_script([name], root)
+
+    def assertFlaggedAt(self, proc, line: int):
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn(f"mod.py:{line}:", proc.stdout)
+
+    def test_triple_quote_inside_a_comment_does_not_hide_the_rest(self):
+        self.assertFlaggedAt(self.scan(f'import os\n# """\n{KILLPG}\n'), 3)
+
+    def test_triple_quote_inside_a_string_does_not_hide_the_rest(self):
+        self.assertFlaggedAt(self.scan(f"import os\nQ = '\"\"\"'\n{KILLPG}\n"), 3)
+
+    def test_code_after_a_closing_docstring_is_scanned(self):
+        src = f'import os\nx = """doc\nmore"""; {KILLPG}\n'
+        self.assertFlaggedAt(self.scan(src), 3)
+
+    def test_docstring_prose_is_not_a_finding(self):
+        proc = self.scan(f'def f():\n    """Never call {KILLPG} here."""\n')
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_api_name_inside_an_ordinary_string_is_not_a_finding(self):
+        proc = self.scan(f'msg = "{KILLPG} is unsupported on Windows"\n')
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    @unittest.skipUnless(sys.version_info >= (3, 12), "PEP 701 f-string tokens")
+    def test_code_inside_an_fstring_expression_is_scanned(self):
+        self.assertFlaggedAt(self.scan('import os\nx = f"""a {' + KILLPG + '} b"""\n'), 2)
+
+    def test_path_rules_still_match_inside_strings(self):
+        self.assertFlaggedAt(self.scan(f'p = "{DESKTOP}/x.txt"\n'), 1)
+
+    def test_guard_hint_inside_a_comment_does_not_excuse_the_line(self):
+        self.assertFlaggedAt(self.scan(f"import os\n{KILLPG}  # unsafe if IS_WINDOWS\n"), 2)
+
+    def test_marker_inside_a_string_does_not_suppress(self):
+        self.assertFlaggedAt(self.scan(f'import os\nx = "# windows-footgun: ok"; {KILLPG}\n'), 2)
+
+    def test_marker_covers_a_multi_line_statement(self):
+        src = f"import os\nx = (\n    {KILLPG}\n)  # windows-footgun: ok\n"
+        proc = self.scan(src)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("1 match(es) suppressed", proc.stderr)
+
+    def test_line_numbers_ignore_form_feeds_and_unicode_separators(self):
+        self.assertFlaggedAt(self.scan(f"import os\n\x0c\n{KILLPG}\n"), 3)
+        self.assertFlaggedAt(self.scan(f'import os\ns = "a b"\n{KILLPG}\n'), 3)
+
+    def test_bom_does_not_break_tokenizing(self):
+        proc = self.scan(f"﻿import os\n{KILLPG}\n")
+        self.assertFlaggedAt(proc, 2)
+        self.assertNotIn("does not tokenize", proc.stderr)
+
+    def test_open_with_encoding_on_a_continuation_line_is_not_flagged(self):
+        src = "with OPEN(path, 'w',\n          encoding='utf-8') as f:\n    pass\n".replace("OPEN(", "open(")
+        proc = self.scan(src)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_multi_line_open_without_encoding_is_still_flagged(self):
+        src = "with OPEN(path,\n          'w') as f:\n    pass\n".replace("OPEN(", "open(")
+        self.assertFlaggedAt(self.scan(src), 1)
+
+    def test_untokenizable_file_falls_back_and_still_reports(self):
+        proc = self.scan(f"import os\n{KILLPG}\nx = '''never closed\n")
+        self.assertFlaggedAt(proc, 2)
+        self.assertIn("does not tokenize", proc.stderr)
+
+
+class PathHandlingTests(unittest.TestCase):
+    def test_checkout_under_a_build_directory_is_still_scanned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "build" / "repo"
+            root.mkdir(parents=True)
+            (root / "mod.py").write_text(f"import os\n{KILLPG}\n", encoding="utf-8")
+            for args in (["mod.py"], ["."]):
+                with self.subTest(args=args):
+                    proc = run_script(args, root)
+                    self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+
+    def test_excluded_dir_inside_the_repo_is_still_excluded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "build").mkdir()
+            (root / "build" / "gen.py").write_text(f"import os\n{KILLPG}\n", encoding="utf-8")
+            (root / "ok.py").write_text("x = 1\n", encoding="utf-8")
+            proc = run_script(["."], root)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_symlink_is_judged_by_its_own_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "real.txt").write_text(f"import os\n{KILLPG}\n", encoding="utf-8")
+            (root / "mod.py").symlink_to("real.txt")
+            proc = run_script(["mod.py"], root)
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+
+    def test_unreadable_file_is_an_error_not_a_clean_scan(self):
+        import importlib.util
+        from unittest import mock
+
+        spec = importlib.util.spec_from_file_location("cwf_under_test", SCRIPT)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = mod  # dataclasses resolve their module here
+        self.addCleanup(sys.modules.pop, spec.name, None)
+        spec.loader.exec_module(mod)
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "mod.py"
+            target.write_text("x = 1\n", encoding="utf-8")
+            with mock.patch.object(Path, "read_text", side_effect=PermissionError(13, "Permission denied")):
+                rc = mod.main([str(target)])
+            self.assertEqual(rc, 2)
+
+class ReviewRegressionTests(unittest.TestCase):
+    """Cases from the pre-merge review of the tokenizer rewrite."""
+
+    scan = TokenizerMaskTests.scan
+    assertFlaggedAt = TokenizerMaskTests.assertFlaggedAt
+
+    def test_other_calls_encoding_or_kwargs_in_the_statement_do_not_excuse_open(self):
+        for src in ("df = read_csv(\n    OPEN(path),\n    encoding='utf-8',\n)\n",
+                    "call(\n    OPEN(path),\n    **opts,\n)\n",
+                    "x = (OPEN(a, encoding='utf-8'),\n     OPEN(b))\n"):
+            with self.subTest(src=src):
+                self.assertFlaggedAt(self.scan(src.replace("OPEN(", "open(")), 2)
+
+    def test_open_at_column_zero_of_a_continuation_row_is_judged_itself(self):
+        src = "x = [\nOPEN(a),\n  OPEN(b, encoding='utf-8')]\n".replace("OPEN(", "open(")
+        self.assertFlaggedAt(self.scan(src), 2)
+
+    def test_fstring_field_code_is_scanned_on_every_python(self):
+        self.assertFlaggedAt(self.scan("import os\nx = f'{" + KILLPG + "}'\n"), 2)
+
+    def test_a_huge_single_statement_scans_in_linear_time(self):
+        import time
+        rows = "".join(f"    'k{i}': 'v{i}',\n" for i in range(30000))
+        start = time.monotonic()
+        proc = self.scan("D = {\n" + rows + "}\n")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertLess(time.monotonic() - start, 20, "statement handling went quadratic")
+
+    def test_dangling_symlink_in_a_walked_dir_is_skipped_like_an_explicit_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "ok.py").write_text("x = 1\n", encoding="utf-8")
+            (root / "gone.py").symlink_to("missing.py")
+            for args in (["."], ["gone.py", "ok.py"]):
+                with self.subTest(args=args):
+                    proc = run_script(args, root)
+                    self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_diff_from_a_subdirectory_under_a_build_named_checkout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "build" / "repo"
+            (repo / "pkg").mkdir(parents=True)
+            git = ["git", "-c", "user.name=t", "-c", "user.email=t@t"]
+            subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+            (repo / "pkg" / "base.py").write_text("x = 1\n", encoding="utf-8")
+            subprocess.run([*git, "-C", str(repo), "add", "-A"], check=True)
+            subprocess.run([*git, "-C", str(repo), "commit", "-qm", "base"], check=True)
+            subprocess.run([*git, "-C", str(repo), "checkout", "-qb", "pr"], check=True)
+            # The changed file is OUTSIDE the cwd (repo/pkg), so it can't be
+            # made relative to the cwd: the exclusion must use the repo root.
+            (repo / "lib").mkdir()
+            (repo / "lib" / "mod.py").write_text(f"import os\n{KILLPG}\n", encoding="utf-8")
+            subprocess.run([*git, "-C", str(repo), "add", "-A"], check=True)
+            subprocess.run([*git, "-C", str(repo), "commit", "-qm", "pr"], check=True)
+            # The checker resolves --diff paths against its own REPO_ROOT, so
+            # run a copy of it from inside the repo.
+            (repo / "scripts").mkdir()
+            (repo / "scripts" / "check.py").write_text(SCRIPT.read_text(encoding="utf-8"), encoding="utf-8")
+            proc = subprocess.run([sys.executable, str(repo / "scripts" / "check.py"), "--diff", "main"],
+                                  cwd=repo / "pkg", capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("mod.py:2:", proc.stdout)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 # .github/actions/detect-changes. Their version hardcodes a repo-specific lane
 # taxonomy (python/frontend/site/mcp_catalog/...) via scripts/ci/classify_changes.py.
 # This is the agnostic seam: caller supplies the filters, so one action gates
-# jobs in any repo. Reference as Ait0u5hi/gh-workflows/actions/detect-changes@v1.
+# jobs in any repo. Reference as Ait0u5hi/gh-workflows/actions/detect-changes@v2.
 #
 # Classify a PR's changed files into named lanes so the caller can conditionally
 # run only the jobs a PR can affect. Fails OPEN: on push/dispatch, or when the

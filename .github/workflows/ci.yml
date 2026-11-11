@@ -36,13 +36,15 @@ jobs:
           installer="https://raw.githubusercontent.com/rhysd/actionlint/${ACTIONLINT_INSTALLER_SHA}/scripts/download-actionlint.bash"
           bash <(curl -sSfL "$installer") "$ACTIONLINT_VERSION"
           ./actionlint -color
-      - name: yamllint
+      # yamllint + zizmor (and pyyaml) come from a hash-locked requirements
+      # file: pip refuses any file whose hash isn't in the lock.
+      - name: Install lint tools (hash-locked)
         run: |
-          pip install --quiet yamllint==1.38.0
-          yamllint .
+          pip install --quiet --require-hashes --only-binary :all: -r requirements/ci.txt
+      - name: yamllint
+        run: yamllint .
       - name: zizmor (workflow security audit)
         run: |
-          pip install --quiet zizmor==1.32.0
           # actions/ too: the composite actions run inside every caller's job.
           zizmor --no-online-audits .github/workflows/ actions/
 
@@ -65,8 +67,8 @@ jobs:
       # RG_VERSION and the hash in step with actions/content-scan/action.yml).
       - name: Install ripgrep (pinned + SHA-256 verified)
         env:
-          RG_VERSION: "14.1.1"
-          RG_SHA256_AMD64: 4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e # x86_64-unknown-linux-musl
+          RG_VERSION: "15.2.0"
+          RG_SHA256_AMD64: 33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c # x86_64-unknown-linux-musl
           RUNNER_ARCH: ${{ runner.arch }}
         run: |
           set -euo pipefail
@@ -90,7 +92,8 @@ jobs:
       # test_sync_labels and test_pr_title_pattern read YAML; setup-python's
       # interpreter has no PyYAML.
       - name: Install PyYAML (pinned)
-        run: pip install --quiet pyyaml==6.0.3
+        run: |
+          pip install --quiet --require-hashes --only-binary :all: -r requirements/ci.txt
       # Every test must run: a skip here means a prerequisite went missing.
       - name: unittest (scripts/tests)
         env:

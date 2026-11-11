@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   ci:
-    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-go-ci.yml@v1
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-go-ci.yml@v2
     # with:
     #   go-versions: '["oldstable","stable"]'   # widen the matrix
     #   run-lint: true                      # needs a .golangci.yml in the repo

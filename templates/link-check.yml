@@ -12,6 +12,6 @@ permissions:
 
 jobs:
   link-check:
-    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-link-check.yml@v1
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-link-check.yml@v2
     # with:
     #   args: "--no-progress --exclude-mail './docs/**/*.md' README.md"

@@ -1,0 +1,25 @@
+# Weekly: are the version-pinned tools (ripgrep, lychee, git-cliff,
+# golangci-lint, actionlint, pip pins in the reusables) behind upstream?
+# Dependabot can't see these. The job FAILS when a pin is behind — GitHub's
+# failed-scheduled-run email is the notification, so no write token is needed.
+# Bumping is a reviewed change: verify the new release's SHA-256 upstream.
+name: Tool pin drift
+
+on:
+  schedule:
+    - cron: "37 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tool-pins:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Compare pins with upstream releases
+        run: python3 scripts/check-tool-pins.py

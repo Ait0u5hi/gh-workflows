@@ -2,14 +2,57 @@
 
 All notable changes to this repo are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are the moving major
-tags callers pin (`@v1`). See [README → Versioning](README.md#versioning).
+tags callers pin (`@v2`). See [README → Versioning](README.md#versioning).
 
-## [Unreleased]
+## [v2] — 2026-11-11
 
-Not yet in `v1`: `@v1` callers get these only once `v1` is retagged. Several
-items below change behavior (marked **behavior change**) — see the
-[README → Versioning](README.md#versioning) rule before deciding between a
-`v1` retag and a `v2` tag.
+`v1` is frozen at `b43f688` and gets no backports. Everything below is new
+relative to it; items marked **behavior change** can turn a caller's CI red.
+
+### Migrating from v1
+1. Change every `Ait0u5hi/gh-workflows/...@v1` in your stubs to `@v2`
+   (copy fresh stubs from `templates/` — they already say `@v2`), and copy
+   the new `templates/zizmor.yml` (disables `self-repository`).
+2. github.com only, and self-hosted runners must be **v2.336.0+** (the
+   reusables use `uses: $/...`). Not available on GitHub Enterprise Server.
+3. Expect new findings, all real: link-check now actually checks links;
+   gitleaks ignores your repo's `.gitleaks.toml` unless `use-repo-config:
+   true`; zizmor 1.32 in meta-lint (new audits, e.g. `issue_comment`); the
+   Windows-footgun checker now sees code a stray `"""` used to hide.
+4. Defaults moved: Python 3.12 (eval/validation), python-ci matrix
+   3.11–3.14, Node 22+24, golangci-lint v2.15.0 (`golangci-version` now
+   defaults to "" = the pinned release; any other version is refused).
+   python-ci / python-eval install `pytest>=8` (`pytest-cov>=5`): a caller
+   pinning pytest 7 in `extra-deps` must move to 8+.
+5. Content-scan with zero active patterns fails; a release tag must be
+   SemVer-shaped; release, golangci-lint and content-scan need a Linux
+   X64/ARM64 runner.
+6. A fork's PR on a self-hosted runner is refused unless you set
+   `allow-untrusted-prs-on-self-hosted: true` (ephemeral runners only).
+7. Pinning a commit SHA instead of `@v2` now pins everything the workflow
+   runs, its own composite actions and helper scripts included.
+
+### Added
+- **Native self-references.** The reusables reach this repo's composite
+  actions with `uses: $/actions/content-scan` / `$/actions/windows-footguns`
+  and check out their helper scripts at `job.workflow_repository` /
+  `job.workflow_sha`, so the inner code always matches the caller's pin
+  (was hard-coded `@v1` / `refs/tags/v1`, which ran different code than a
+  caller pinned to `@main` or a SHA). The governance dogfood therefore lints
+  each PR with that PR's own checker (closes #52, #53). `tools-ref` now
+  defaults to `""` and is only an override. actionlint 1.7.12 doesn't know
+  these features yet; `.github/actionlint.yaml` ignores exactly those errors
+  in exactly those files (rhysd/actionlint#732, #707), kept narrow by a test.
+- **Self-hosted guard** (python-ci, python-eval, node-ci, go-ci,
+  content-scan, crossplatform-lint, codeql): fails a job, before checkout, when a
+  fork's PR (or a comment trigger) lands on a self-hosted runner. Opt out
+  with `allow-untrusted-prs-on-self-hosted`. A misconfiguration guard, not a
+  security boundary — see README → Security model.
+- `scripts/check-tool-pins.py` + weekly `tool-pins.yml`: fails when a
+  version-pinned tool (ripgrep, lychee, git-cliff, golangci-lint, actionlint,
+  pip pins) falls behind upstream.
+- Dependabot `cooldown: default-days: 7` (here and in the template) and a
+  pip entry for this repo's hash-locked `requirements/`.
 
 ### Security
 - `reusable-release.yml`: the tag name reached a shell unquoted through
@@ -50,8 +93,9 @@ items below change behavior (marked **behavior change**) — see the
   declared (optional) secret that actually reaches gitleaks-action.
 - `reusable-codeql.yml`: `continue-on-error` hid every analysis failure;
   analysis is now fatal and only the separate SARIF upload is tolerated.
-- `reusable-repo-docs.yml` / `reusable-doc-commands.yml`: `tools-ref` defaults
-  to `refs/tags/v1` (a bare `v1` resolves a branch named `v1` first).
+- `reusable-repo-docs.yml` / `reusable-doc-commands.yml`: the checker is no
+  longer fetched from a bare `v1` (which resolves a branch named `v1` before
+  the tag); see Added → native self-references.
 - `scripts/check-repo-docs.py`: a directory or a symlink (e.g. to `/dev/null`)
   satisfied "presence". `scripts/check-doc-commands.py`: a non-shell fence
   before a bash block hid it; `~~~`, info strings, CRLF, `--state=all`, `-s`
@@ -62,6 +106,27 @@ items below change behavior (marked **behavior change**) — see the
 - `label.yml`: top-level `permissions: {}`, timeout, concurrency.
 
 ### Changed
+- **Behavior change:** `scripts/check-windows-footguns.py` reads code with
+  the stdlib tokenizer: comments, docstrings and (for API-name rules) string
+  contents are masked column-aligned; guard hints count only in code; the
+  `# windows-footgun: ok` marker counts only in a real comment and covers a
+  whole multi-line statement; `open()` is judged over its whole statement;
+  excluded dirs are matched relative to the scan root; symlinks are judged by
+  their own name; an unreadable file exits 2. Over CPython 3.12's stdlib it
+  drops 9 false positives and misses nothing the old checker found.
+- **Behavior change:** content-scan always installs its pinned ripgrep
+  (now 15.2.0) and never uses an `rg` already on the runner;
+  `scripts/rg-need-install.sh` is gone.
+- **Behavior change:** go-ci installs golangci-lint v2.15.0 as a
+  hash-verified download (the old `curl | sh` installer exited 0 on a failed
+  download); `golangci-version` defaults to "" (the pinned release) and
+  other versions are refused.
+- **Behavior change:** meta-lint zizmor 1.26.1 → 1.32.0; python-ci /
+  python-eval install `pytest>=8` / `pytest-cov>=5` (were unpinned; a floor
+  rather than an exact pin, so callers on Python 3.9 or with their own
+  pytest pin still resolve).
+- This repo's CI installs its lint tools with `pip --require-hashes` from
+  `requirements/ci.txt` (`uv pip compile --universal --generate-hashes`).
 - **Behavior change (defaults):** `reusable-python-eval` /
   `reusable-python-validation` `python-version` `3.10` → `3.12`;
   `reusable-python-ci` `python-versions` → `["3.11","3.12","3.13","3.14"]`;

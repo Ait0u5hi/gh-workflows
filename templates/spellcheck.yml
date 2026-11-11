@@ -13,6 +13,6 @@ permissions:
 
 jobs:
   spellcheck:
-    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-spellcheck.yml@v1
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-spellcheck.yml@v2
     # with:
     #   codespell-args: "--skip=*.lock,*.svg -L crate,ba"

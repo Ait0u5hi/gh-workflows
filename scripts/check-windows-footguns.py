@@ -37,7 +37,18 @@ Exit status:
         DOES resolve but has zero changed .py files is still NOT-APPLICABLE/
         exit 0 (nothing to report, but the lookup itself worked); a ref that
         doesn't resolve at all is a usage error and must fail loudly, never
-        get silently counted as "zero files changed."
+        get silently counted as "zero files changed." Also returned when a
+        file in scope could not be read: an unreadable file is never
+        counted as scanned-and-clean.
+
+How it reads code: each file is tokenized (stdlib `tokenize`). Comments and
+triple-quoted strings (docstrings) are blanked before matching; rules that
+name a Python API also ignore the contents of ordinary string literals,
+while path/command rules (~/Desktop, wmic, ./script) match inside them. A
+`# windows-footgun: ok` marker is honoured only in a real comment, and a
+marker on any row of a multi-line statement covers the whole statement. A file that does not
+tokenize is scanned line by line with only `#` comments stripped (it can
+only report more, never less).
 
 Suppress an intentional use (e.g. tests or platform-gated code) with:
     os.kill(pid, 0)  # windows-footgun: ok — only called on POSIX
@@ -46,10 +57,13 @@ Suppress an intentional use (e.g. tests or platform-gated code) with:
 from __future__ import annotations
 
 import argparse
+import io
 import os
 import re
 import subprocess
 import sys
+import tokenize
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -166,8 +180,18 @@ class Footgun:
     # Optional post-match predicate. Takes the re.Match and returns True
     # if the match is a REAL footgun (not a false positive). Use this when
     # the regex can't fully distinguish (e.g. open() where mode may contain
-    # "b" for binary, or the line may have `encoding=` elsewhere).
+    # "b" for binary). Called as post_filter(text, head_end): `text` is the
+    # "keep" view (comments and triple-quoted blocks blanked, ordinary string
+    # literals intact) of the whole logical statement the match is in, rows
+    # joined with one space, and `head_end` is the index in `text` just past
+    # the match's `head` group (for open(): just after the paren).
     post_filter: "callable | None" = None
+    # True for rules whose evidence lives INSIDE string literals (a path
+    # like "~/Desktop", "wmic", "./script"). Those search the "keep" view.
+    # Every other rule names a Python API and searches the "blank" view,
+    # where string contents are spaced out, so prose such as
+    # "os.killpg(...) is unsupported" inside a string is not a finding.
+    needs_strings: bool = False
 
 
 _PSEUDO_FILE_ARG = re.compile(r"""^[rRfF]{0,2}['"]/(?:proc|sys)/""")
@@ -230,9 +254,8 @@ def _split_call_args(line: str, start: int) -> list[str]:
 _STR_LITERAL = re.compile(r"""^[rRbBuUfF]{0,2}(['"])(?P<body>.*)\1$""")
 
 
-def _open_call_parts(m: re.Match, line: str) -> tuple[str, str | None]:
-    """(first argument, literal mode or None) of the open() call matched by m."""
-    args = _split_call_args(line, m.end("head"))
+def _open_call_parts(args: list[str]) -> tuple[str, str | None]:
+    """(first argument, literal mode or None) of an open() call's arguments."""
     first = args[0] if args else ""
     mode_arg = None
     if len(args) > 1 and not re.match(r"^\w+\s*=(?!=)", args[1]):
@@ -245,23 +268,24 @@ def _open_call_parts(m: re.Match, line: str) -> tuple[str, str | None]:
     return first, (lit.group("body") if lit else None)
 
 
-def _open_is_text_footgun(m: re.Match, line: str) -> bool:
-    first, mode = _open_call_parts(m, line)
-    return (
-        "b" not in (mode or "")
-        and "encoding=" not in line
-        and "encoding =" not in line
-        # Skip `def open(` and `async def open(` (method definitions)
-        and not line.lstrip().startswith("def ")
-        and not line.lstrip().startswith("async def ")
-        # Skip open(path, **kwargs) patterns — encoding may be in the dict.
-        # Too expensive to trace; require the author to set encoding in
-        # the dict and trust them (or they can add a # windows-footgun: ok).
-        and "**" not in line
-        # Skip literal Linux pseudo-files (/proc/..., /sys/...): they
-        # exist only on Linux and are always ASCII, so encoding is moot.
-        and not _is_pseudo_file_arg(first)
-    )
+def _open_is_text_footgun(text: str, head_end: int) -> bool:
+    """Decide from THIS call's own arguments only: an `encoding=` or `**`
+    belonging to another call in the same statement must not excuse it."""
+    stripped = text.lstrip()
+    # Skip `def open(` and `async def open(` (method definitions).
+    if stripped.startswith("def ") or stripped.startswith("async def "):
+        return False
+    args = _split_call_args(text, head_end)
+    if any(re.match(r"^encoding\s*=(?!=)", a) for a in args[1:]):
+        return False
+    # open(path, **kwargs): encoding may be in the dict. Too expensive to
+    # trace; trust the author (or they can add a # windows-footgun: ok).
+    if any(a.startswith("**") for a in args):
+        return False
+    first, mode = _open_call_parts(args)
+    # Binary mode needs no encoding. Literal Linux pseudo-files (/proc/...,
+    # /sys/...) exist only on Linux and are always ASCII, so encoding is moot.
+    return "b" not in (mode or "") and not _is_pseudo_file_arg(first)
 
 
 FOOTGUNS: list[Footgun] = [
@@ -391,6 +415,7 @@ FOOTGUNS: list[Footgun] = [
             "bash/python scripts without an explicit interpreter."
         ),
         fix="Use [sys.executable, 'scriptname.py', ...] explicitly.",
+        needs_strings=True,
     ),
     Footgun(
         name="wmic invocation without shutil.which guard",
@@ -412,6 +437,7 @@ FOOTGUNS: list[Footgun] = [
             "    subprocess.run(['powershell', '-NoProfile', '-Command',\n"
             "                    'Get-CimInstance Win32_Process | ...'])"
         ),
+        needs_strings=True,
     ),
     Footgun(
         name="hardcoded ~/Desktop (OneDrive trap)",
@@ -428,6 +454,7 @@ FOOTGUNS: list[Footgun] = [
             "read the Shell Folders registry key, or run PowerShell "
             "[Environment]::GetFolderPath('Desktop')."
         ),
+        needs_strings=True,
     ),
     Footgun(
         name="asyncio add_signal_handler without try/except",
@@ -447,11 +474,23 @@ FOOTGUNS: list[Footgun] = [
 ]
 
 
-def should_scan_file(path: Path) -> bool:
-    """Return True if this file is in scope for the checker."""
-    # Skip the excluded dirs
-    parts = set(path.parts)
-    if parts & EXCLUDED_DIRS:
+def should_scan_file(path: Path, base: Path | None = None) -> bool:
+    """Return True if this file is in scope for the checker.
+
+    Excluded directory names are matched against the path RELATIVE to the
+    scan base (the walked root, or the current directory for explicit
+    paths), never against the absolute path: a checkout that happens to live
+    under e.g. /home/runner/work/build/build/ must not exclude every file.
+    """
+    bases = [base] if base is not None else [Path.cwd(), REPO_ROOT]
+    rel_parts = path.parts
+    for b in bases:
+        try:
+            rel_parts = path.relative_to(b).parts
+            break
+        except ValueError:
+            continue
+    if set(rel_parts) & EXCLUDED_DIRS:
         return False
     # Skip excluded suffixes
     for suffix in EXCLUDED_SUFFIXES:
@@ -480,23 +519,21 @@ def iter_files(paths: Iterable[Path]) -> Iterable[Path]:
                 dirs[:] = [d for d in dirs if d not in EXCLUDED_DIRS]
                 for fname in files:
                     fpath = Path(root) / fname
-                    if should_scan_file(fpath):
+                    # A dangling symlink is skipped here exactly as it is
+                    # when named explicitly (is_file() is False for it).
+                    if not fpath.is_file():
+                        continue
+                    if should_scan_file(fpath, base=p):
                         yield fpath
 
 
 def _strip_code(line: str) -> str:
-    """Return just the code portion of a line — strip trailing comments and
-    skip lines that are entirely inside a string literal or comment.
-
-    Heuristic only (we don't parse Python); good enough to avoid flagging
-    our own `# ``os.kill(pid, 0)`` is NOT a no-op` docstring-style comments.
-    """
+    """Fallback only (a file that fails to tokenize): drop a trailing
+    ``# ...`` comment using a simple quote-aware scan. No docstring state is
+    kept, so the fallback can only report MORE than the tokenizer path."""
     stripped = line.lstrip()
-    # Line starts with # — entirely a comment.
     if stripped.startswith("#"):
         return ""
-    # Remove trailing "# ..." inline comment. Naive — doesn't handle `#`
-    # inside strings — but on balance reduces noise far more than it adds.
     hash_idx = _find_unquoted_hash(line)
     if hash_idx is not None:
         return line[:hash_idx]
@@ -504,11 +541,7 @@ def _strip_code(line: str) -> str:
 
 
 def _find_unquoted_hash(line: str) -> int | None:
-    """Index of the first `#` not inside a single/double/triple-quoted string.
-
-    Simple state machine — good enough for the 99% case of "code, then
-    optional trailing comment."
-    """
+    """Index of the first `#` not inside a single/double-quoted string."""
     i = 0
     n = len(line)
     in_s = False  # single-quote string
@@ -528,81 +561,198 @@ def _find_unquoted_hash(line: str) -> int | None:
     return None
 
 
-def scan_file(path: Path, footguns: list[Footgun]) -> list[tuple[int, str, Footgun]]:
-    """Return a list of (line_number, line, footgun) for unsuppressed matches."""
+# Token types that only exist on newer Pythons (PEP 701 f-strings on 3.12+,
+# PEP 750 t-strings on 3.14+). Looked up by name so older interpreters work.
+_FSTART = {t for t in (getattr(tokenize, "FSTRING_START", None),
+                       getattr(tokenize, "TSTRING_START", None)) if t is not None}
+_FMIDDLE = {t for t in (getattr(tokenize, "FSTRING_MIDDLE", None),
+                        getattr(tokenize, "TSTRING_MIDDLE", None)) if t is not None}
+_FEND = {t for t in (getattr(tokenize, "FSTRING_END", None),
+                     getattr(tokenize, "TSTRING_END", None)) if t is not None}
+_PREFIX_CHARS = "rRbBuUfFtT"
+_LEGACY_FSTRINGS = sys.version_info < (3, 12)
+
+
+def _is_triple(token_text: str) -> bool:
+    return token_text.lstrip(_PREFIX_CHARS)[:3] in ('"""', "'''")
+
+
+def _blank(buf: list[list[str]], start: tuple[int, int], end: tuple[int, int]) -> None:
+    """Replace buf's characters in [start, end) (1-based rows, 0-based
+    columns, as tokenize reports them) with spaces, keeping lengths."""
+    (sr, sc), (er, ec) = start, end
+    for r in range(sr, er + 1):
+        row = buf[r - 1]
+        lo = sc if r == sr else 0
+        hi = ec if r == er else len(row)
+        for c in range(lo, min(hi, len(row))):
+            row[c] = " "
+
+
+@dataclass
+class _Views:
+    """Column-aligned views of a file, one string per physical line.
+
+    keep:  comments and triple-quoted strings (docstrings, prose blocks)
+           blanked; ordinary string literals intact.
+    blank: like keep, but the contents of EVERY string literal blanked too
+           (prefix and quotes kept).
+    comments: row -> COMMENT token texts on that row.
+    statement: row -> (first_row, last_row) of the logical statement that
+           row belongs to: a suppression marker in a comment on ANY row of a
+           multi-line statement covers every row of it (flake8 `noqa`
+           semantics), and post_filters see the whole statement.
+    """
+
+    keep: list[str]
+    blank: list[str]
+    comments: dict
+    statement: dict
+
+
+def _build_views(lines: list[str]) -> _Views | None:
+    """Tokenize and build the views; None if the file does not tokenize."""
+    text = "\n".join(lines)
+    try:
+        # tokenize reports errors lazily, while iterating: materialise it
+        # inside the try. IndentationError/TabError subclass SyntaxError.
+        toks = list(tokenize.generate_tokens(io.StringIO(text).readline))
+    except (tokenize.TokenError, SyntaxError):
+        return None
+    keep = [list(line) for line in lines]
+    blank = [list(line) for line in lines]
+    comments: dict = defaultdict(list)
+    statement: dict = {}
+    fstack: list[bool] = []
+    stmt_first: int | None = None
+    for tok in toks:
+        ttype, ttext, start, end = tok.type, tok.string, tok.start, tok.end
+        if ttype in (tokenize.NL, tokenize.INDENT, tokenize.DEDENT, tokenize.ENDMARKER):
+            continue
+        if ttype == tokenize.COMMENT:
+            comments[start[0]].append(ttext)
+            _blank(keep, start, end)
+            _blank(blank, start, end)
+            continue
+        if ttype == tokenize.NEWLINE:
+            if stmt_first is not None:
+                for r in range(stmt_first, start[0] + 1):
+                    statement[r] = (stmt_first, start[0])
+            stmt_first = None
+            continue
+        if stmt_first is None:
+            stmt_first = start[0]
+        if ttype == tokenize.STRING:
+            if _is_triple(ttext):
+                _blank(keep, start, end)
+                _blank(blank, start, end)
+            elif _LEGACY_FSTRINGS and "f" in ttext[: len(ttext) - len(ttext.lstrip(_PREFIX_CHARS))].lower():
+                # Before 3.12 an f-string is ONE STRING token, so blanking it
+                # would also hide the code in its {...} fields. Leave it.
+                pass
+            else:
+                body = ttext.lstrip(_PREFIX_CHARS)
+                open_len = len(ttext) - len(body) + 1  # prefix + one quote
+                inner_start = (start[0], start[1] + open_len)
+                inner_end = (end[0], end[1] - 1)
+                if inner_start < inner_end:
+                    _blank(blank, inner_start, inner_end)
+        elif ttype in _FSTART:
+            fstack.append(_is_triple(ttext))
+        elif ttype in _FMIDDLE:
+            _blank(blank, start, end)
+            if fstack and fstack[-1]:
+                _blank(keep, start, end)
+        elif ttype in _FEND:
+            if fstack:
+                fstack.pop()
+    return _Views(
+        keep=["".join(r) for r in keep],
+        blank=["".join(r) for r in blank],
+        comments=comments,
+        statement=statement,
+    )
+
+
+class UnreadableFile(Exception):
+    """A file in scope could not be read; reported, never counted as clean."""
+
+
+def scan_file(path: Path, footguns: list[Footgun]) -> tuple[list[tuple[int, str, Footgun]], int]:
+    """Return ((line_number, line, footgun) unsuppressed matches, suppressed count)."""
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return []
+    except OSError as e:
+        raise UnreadableFile(f"{e.strerror or e}") from e
+    text = text.removeprefix("\ufeff")
+    # split("\n"), NOT splitlines(): splitlines() also breaks on form feeds,
+    # \x1c-\x1e, \x85, \u2028 and \u2029, which tokenize (and editors'
+    # line numbers) do not, so reported line numbers drifted.
+    lines = text.split("\n")
+    views = _build_views(lines)
+    if views is None:
+        print(f"note: {rel_to_repo(path)} does not tokenize; scanned line by line "
+              "(comments stripped, no docstring detection)", file=sys.stderr)
+
     matches: list[tuple[int, str, Footgun]] = []
+    suppressed = 0
+    # Per-statement data, computed once and only when a rule matches there
+    # (a 16k-row literal must not cost O(rows^2)).
+    stmt_cache: dict[tuple[int, int], tuple[bool, str, list[int]]] = {}
 
-    # Track whether we're inside a triple-quoted string (docstring/raw block).
-    # Simple state machine — handles both ''' and """, toggled by the FIRST
-    # triple-quote we see; we don't try to handle nested or f-string cases.
-    in_triple: str | None = None  # None, "'''", or '"""'
+    def statement_info(i: int) -> tuple[bool, str, int]:
+        """(suppressed?, keep text of the statement, column offset of row i)."""
+        if views is None:
+            return bool(SUPPRESS_MARKER.search(lines[i - 1])), _strip_code(lines[i - 1]), 0
+        span = views.statement.get(i, (i, i))
+        if span not in stmt_cache:
+            first, last = span
+            marked = any(
+                SUPPRESS_MARKER.search(c)
+                for r in range(first, last + 1)
+                for c in views.comments.get(r, ())
+            )
+            rows = views.keep[first - 1:last]
+            offsets, pos = [], 0
+            for row in rows:
+                offsets.append(pos)
+                pos += len(row) + 1  # rows are joined with one space
+            stmt_cache[span] = (marked, " ".join(rows), offsets)
+        marked, text, offsets = stmt_cache[span]
+        return marked, text, offsets[i - span[0]]
 
-    for i, line in enumerate(text.splitlines(), start=1):
-        # Update triple-quote state based on this line's occurrences.
-        code_for_scan = line
-        if in_triple:
-            # We're inside a docstring — skip the whole line's scan.
-            # Check if it closes here.
-            if in_triple in line:
-                # Find the closing delimiter; anything after it is real code.
-                after = line.split(in_triple, 1)[1]
-                in_triple = None
-                code_for_scan = after
-            else:
-                continue
-        # Now check for docstring-open in the (possibly after-triple) portion.
-        # Scan for the first unescaped '''/""" in the current code_for_scan.
-        stripped = code_for_scan.strip()
-        for delim in ('"""', "'''"):
-            if delim in code_for_scan:
-                # Count occurrences — even count means single-line docstring,
-                # odd means we've entered a multi-line one.
-                count = code_for_scan.count(delim)
-                if count % 2 == 1:
-                    # Odd — we're now inside the triple-quoted block.
-                    # Scan only the part BEFORE the opening delimiter.
-                    before = code_for_scan.split(delim, 1)[0]
-                    code_for_scan = before
-                    in_triple = delim
-                    break
-                else:
-                    # Even — entire docstring fits on one line. Strip it
-                    # from the scan text to avoid matching on prose.
-                    parts = code_for_scan.split(delim)
-                    # Keep the "outside" parts (every other chunk, starting
-                    # with index 0) as code, drop the "inside" parts.
-                    code_for_scan = "".join(parts[::2])
-                    break
-
-        if SUPPRESS_MARKER.search(line):
+    for i, raw in enumerate(lines, start=1):
+        if views is None:
+            keep = blank = _strip_code(raw)
+        else:
+            keep, blank = views.keep[i - 1], views.blank[i - 1]
+        if not keep.strip():
             continue
-        # Skip if the line has an obvious guard — e.g. hasattr/getattr/
-        # shutil.which or a platform check. False negatives are acceptable;
-        # the inline suppression marker is the authoritative override.
-        if any(hint in line for hint in GUARD_HINTS):
-            continue
-        code = _strip_code(code_for_scan)
-        if not code.strip():
+        # A guard hint counts only in code (not in a comment): e.g.
+        # `os.killpg(1)  # unsafe if IS_WINDOWS` is still a finding.
+        if any(hint in keep for hint in GUARD_HINTS):
             continue
         for fg in footguns:
             if fg.path_allowlist and any(s in str(path) for s in fg.path_allowlist):
                 continue
-            match = fg.pattern.search(code)
+            match = fg.pattern.search(keep if fg.needs_strings else blank)
             if not match:
                 continue
+            marked, stmt_text, row_offset = statement_info(i)
             if fg.post_filter is not None:
                 try:
-                    if not fg.post_filter(match, line):
+                    # Views are column-aligned, so the row's column plus the
+                    # row's offset is the same position in the statement.
+                    if not fg.post_filter(stmt_text, row_offset + match.end("head")):
                         continue
                 except (IndexError, AttributeError):
                     # Post-filter assumed a named group that isn't there — skip.
                     continue
-            matches.append((i, line.rstrip(), fg))
-    return matches
+            if marked:
+                suppressed += 1
+                continue
+            matches.append((i, raw.rstrip(), fg))
+    return matches, suppressed
 
 
 def get_staged_files() -> list[Path]:
@@ -768,7 +918,9 @@ def main(argv: list[str]) -> int:
             print(f"check-windows-footguns: {e}", file=sys.stderr)
             return 2
     elif args.paths:
-        roots = [p.resolve() for p in args.paths]
+        # absolute(), not resolve(): a symlink is judged by its own name, so
+        # `mod.py -> mod.txt` is scanned as the .py file it presents as.
+        roots = [p.absolute() for p in args.paths]
     else:
         # Default: staged changes
         roots = get_staged_files()
@@ -781,12 +933,19 @@ def main(argv: list[str]) -> int:
             return 0
 
     total_matches = 0
+    total_suppressed = 0
     files_scanned = 0
+    unreadable: list[str] = []
     # Remember what was passed so a zero-scope run can say what it skipped.
     passed = [] if args.all else [Path(r) for r in roots]
     for path in iter_files(roots):
         files_scanned += 1
-        matches = scan_file(path, FOOTGUNS)
+        try:
+            matches, suppressed = scan_file(path, FOOTGUNS)
+        except UnreadableFile as e:
+            unreadable.append(f"{rel_to_repo(path)}: {e}")
+            continue
+        total_suppressed += suppressed
         for lineno, line, fg in matches:
             rel = rel_to_repo(path)
             print(f"{rel}:{lineno}: [{fg.name}]")
@@ -795,6 +954,17 @@ def main(argv: list[str]) -> int:
             print(f"    Fix: {fg.fix.splitlines()[0]}")
             print()
             total_matches += 1
+
+    if total_suppressed:
+        print(f"note: {total_suppressed} match(es) suppressed with `# windows-footgun: ok`.",
+              file=sys.stderr)
+
+    if unreadable:
+        # Never let a file we could not read count as scanned-and-clean.
+        for msg in unreadable:
+            print(f"check-windows-footguns: could not read {msg}", file=sys.stderr)
+        print(f"\n✗ {len(unreadable)} file(s) in scope could not be read.", file=sys.stderr)
+        return 2
 
     if total_matches:
         print(

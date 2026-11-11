@@ -20,7 +20,7 @@ permissions**; the reusables own jobs, steps, and timeouts.
 ```yaml
 jobs:
   validation:
-    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-python-validation.yml@v1
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-python-validation.yml@v2
     with:
       plugin-validate: true
 ```
@@ -32,7 +32,7 @@ declare it in their `workflow_call.secrets` block, so pass it by name:
 `reusable-content-scan.yml` (`patterns`).
 
 Also copy `templates/zizmor.yml` to the repo's `.github/zizmor.yml` so the
-meta-lint zizmor pass accepts the `@v1` ref-pin into this repo while still
+meta-lint zizmor pass accepts the `@v2` ref-pin into this repo while still
 requiring hash-pins for third-party actions.
 
 One-time repo setting (admin, web UI): *Settings → Actions → General →
@@ -63,12 +63,12 @@ governance — adopt them in any repo, yours or otherwise.
 |---|---|---|
 | `reusable-python-ci.yml` | ruff lint (once) + pytest across a **version matrix**; test-existence guard skips cleanly until tests exist. **No plugin.yaml coupling** — the generic Python entry point | `python-versions` (`["3.11","3.12","3.13","3.14"]`), `run-ruff` (true), `test-command` (""), `extra-deps` (""), `upload-coverage` (false — pytest-cov → `coverage.xml` artifact, no external service) |
 | `reusable-node-ci.yml` | setup-node + npm cache, `npm ci`, build/typecheck `--if-present`, optional test command; optional **version matrix** | `node-version` ("" = use matrix), `node-versions` (`["22","24"]`), `run-build` (true), `run-typecheck` (false), `test-command` (""), `install-command` (`npm ci`) |
-| `reusable-go-ci.yml` | `go build` + `go vet` + `go test` across a Go **version matrix** (`-race` opt-out); optional golangci-lint (installer SHA-pinned). No third-party actions — first-party `setup-go` + toolchain only. No-module guard skips cleanly | `go-versions` (`["stable"]`), `run-vet` (true), `run-race` (true), `run-lint` (false), `golangci-version` (v2.13.0), `test-command` ("") |
+| `reusable-go-ci.yml` | `go build` + `go vet` + `go test` across a Go **version matrix** (`-race` opt-out); optional golangci-lint (pinned release binary, SHA-256 verified). No third-party actions — first-party `setup-go` + toolchain only. No-module guard skips cleanly | `go-versions` (`["stable"]`), `run-vet` (true), `run-race` (true), `run-lint` (false), `golangci-version` ("" = the pinned v2.15.0), `test-command` ("") |
 | `reusable-pr-title.yml` | enforce a Conventional-Commits PR title (the squash-merge subject) via **pure inline bash** — no third-party action. Complements the commit-message convention CONTRIBUTING already requires | `types` (`feat\|fix\|docs\|…`) |
 | `reusable-python-eval.yml` | pytest with test-existence guard, single version. Kept for existing callers — new repos should prefer `reusable-python-ci.yml` (adds ruff + a matrix) | `python-version` (3.12), `extra-deps` (pyyaml) |
 | `reusable-codeql.yml` | CodeQL code scanning (SAST), matrix by language; SARIF to the Security tab. An analysis failure fails the job; only the SARIF upload is tolerated (no GHAS). **Public repos only** — auto-skips on private personal repos (no GitHub Advanced Security). Caller grants `security-events: write` | `languages` (`["python"]`), `build-mode` (none) |
 | `reusable-security.yml` | gitleaks secret scan over full history — caller must grant `pull-requests: read`. **Org adopters:** `gitleaks-action` needs a `GITLEAKS_LICENSE` secret for organizations (free for individual accounts + public repos) — pass `secrets: GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}`; `scanner: local` runs the runner's own pinned `gitleaks` binary instead (no action, no license key). Runs gitleaks' built-in rules, **not** the scanned repo's `.gitleaks.toml` (a PR could otherwise allowlist everything) unless `use-repo-config: true`; per-finding `.gitleaksignore` fingerprints and inline `gitleaks:allow` comments are still honoured, so review them like code | `scanner` (`action` \| `local`), `use-repo-config` (false); `secrets.GITLEAKS_LICENSE` (optional) |
-| `reusable-content-scan.yml` | ripgrep sweep for **caller-supplied** patterns (private hostnames, internal jargon, journal-voice phrases), from a committed file, an optional `secrets: patterns:`, or both. Ships no wordlist itself. Findings from the secret redact to `path:line` (never the matched text) since public Actions logs are world-readable; the committed file's findings print full lines as before. Installs a pinned, SHA-256-verified `rg` (amd64/arm64) when the runner doesn't have one. Complements gitleaks: catches leaks that are not secrets. Fails closed: zero active patterns, a symlinked patterns file, or `.gitignore`/`.rgignore`/binary tricks can't turn it green | `patterns-file` (`.github/content-scan-patterns.txt`), `paths` (`.`), `redact-matches` (`auto`), `pcre2` (false); `secrets.patterns` (optional) |
+| `reusable-content-scan.yml` | ripgrep sweep for **caller-supplied** patterns (private hostnames, internal jargon, journal-voice phrases), from a committed file, an optional `secrets: patterns:`, or both. Ships no wordlist itself. Findings from the secret redact to `path:line` (never the matched text) since public Actions logs are world-readable; the committed file's findings print full lines as before. Always installs its own pinned, SHA-256-verified `rg` 15.2.0 (Linux amd64/arm64 runners only); never uses an `rg` already on the runner. Complements gitleaks: catches leaks that are not secrets. Fails closed: zero active patterns, a symlinked patterns file, or `.gitignore`/`.rgignore`/binary tricks can't turn it green | `patterns-file` (`.github/content-scan-patterns.txt`), `paths` (`.`), `redact-matches` (`auto`), `pcre2` (false); `secrets.patterns` (optional) |
 | `reusable-osv.yml` | OSV-Scanner dependency-CVE scan; SARIF to the Security tab — caller must grant `security-events: write`. Language-agnostic (auto-detects manifests). The default `action` scanner is a **docker** action; `scanner: local` runs the runner's own pinned `osv-scanner` binary (self-hosted runners without docker) | `scanner` (`action` \| `local`), `scan-args` (`--recursive .`), `fail-on-vuln` (false) |
 | `reusable-dependency-review.yml` | first-party `dependency-review-action` — blocks a PR that adds a vulnerable/disallowed dep. Needs the Dependency Graph (default-on for public repos) | `fail-on-severity` (high) |
 | `reusable-spellcheck.yml` | codespell over the repo (pinned pip install, no action). Reads `.codespellrc` / `[tool.codespell]` for ignores | `codespell-args` ("") |
@@ -88,8 +88,8 @@ distributed via separate templates (`templates/pr-governance.yml`,
 | `reusable-python-validation.yml` | ruff (repo's `ruff.toml`) + meta-lint (actionlint + yamllint + zizmor); the **`plugin-validate` path** (Hermes `plugin.yaml` keys + compileall) is opt-in governance | `python-version` (3.12), `plugin-validate` (false), `meta-lint` (true) |
 | `reusable-contributor-check.yml` | fails a PR whose commit author emails (merge commits included) aren't mapped under `contributors/emails/<email>` (add with `scripts/add_contributor.py`); GitHub `id+login@users.noreply.github.com` addresses and a short list of exact bot addresses auto-resolve | `base-ref` (main) |
 | `reusable-crossplatform-lint.yml` | scans changed Python for Windows footguns via `scripts/check-windows-footguns.py`; suppress a platform-gated line with `# windows-footgun: ok` | `base-ref` (main) |
-| `reusable-repo-docs.yml` | fails a PR when the repo lacks its required contribution docs (CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, LICENSE, PR template — regular files, not symlinks out of the repo) or CONTRIBUTING doesn't link the shared standard. Presence only | `tools-ref` (`refs/tags/v1`), `skip` (""), `require-standard-link` (true) |
-| `reusable-doc-commands.yml` | statically validates the `gh`/`git` commands in fenced shell blocks of the given docs (flag values like `gh search prs --state`); executes nothing | `tools-ref` (`refs/tags/v1`), `paths` (`CONTRIBUTING.md`) |
+| `reusable-repo-docs.yml` | fails a PR when the repo lacks its required contribution docs (CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, LICENSE, PR template — regular files, not symlinks out of the repo) or CONTRIBUTING doesn't link the shared standard. Presence only | `tools-ref` ("" = the same commit as this workflow), `skip` (""), `require-standard-link` (true) |
+| `reusable-doc-commands.yml` | statically validates the `gh`/`git` commands in fenced shell blocks of the given docs (flag values like `gh search prs --state`); executes nothing | `tools-ref` ("" = the same commit as this workflow), `paths` (`CONTRIBUTING.md`) |
 
 Every reusable takes `runs-on` (default `ubuntu-latest`). To move a repo to a
 self-hosted runner later, set it in the stub — one line. Caveats when that
@@ -98,25 +98,30 @@ x86_64 binaries (lychee, git-cliff) need an x86 host; runners register per-repo
 on a personal account; registration needs repo admin; never attach a
 self-hosted runner to a public repo, and only use **ephemeral** runners for
 anything that runs PR code — a persistent runner lets one PR leave a planted
-`rg`, `gitleaks` or `~/.gitconfig` behind for the next job.
+`gitleaks` or `~/.gitconfig` behind for the next job. Self-hosted runners
+must be **v2.336.0 or newer** (the reusables use the `$/` self-repository
+syntax). The reusables that run PR code refuse a fork's PR on a self-hosted
+runner unless you set `allow-untrusted-prs-on-self-hosted: true` (python-ci,
+python-eval, node-ci, go-ci, content-scan, crossplatform-lint, codeql); see
+[Security model](#security-model) for why that is a seatbelt, not a lock.
 
 ## Composite actions
 
-Reference intra-org, ref-pinned (`@v1`), same as the reusables:
+Reference intra-org, ref-pinned (`@v2`), same as the reusables:
 
 | Action | Purpose |
 |---|---|
 | `actions/windows-footguns` | wraps the vendored cross-platform linter; used by `reusable-crossplatform-lint.yml` |
 | `actions/retry` | run a shell command with retries — wrap flaky installs (`npm ci`, `uv sync`) so CI self-heals on transient network flakes; optional `stdout` output |
 | `actions/detect-changes` | diff changed files against `base-ref` and match caller-supplied `filters` (newline `name: glob…`); emits a JSON `changes` map + `any` bool for job gating. Fails open on push/dispatch. Generalized from hermes-agent's repo-specific classifier |
-| `actions/content-scan` | installs a pinned, SHA-256-verified `rg` if missing, then runs `scripts/content-scan.sh`; used by `reusable-content-scan.yml` |
+| `actions/content-scan` | installs its pinned, SHA-256-verified `rg`, then runs `scripts/content-scan.sh`; used by `reusable-content-scan.yml` |
 
 ```yaml
-- uses: Ait0u5hi/gh-workflows/actions/retry@v1
+- uses: Ait0u5hi/gh-workflows/actions/retry@v2
   with:
     command: npm ci
 - id: detect
-  uses: Ait0u5hi/gh-workflows/actions/detect-changes@v1
+  uses: Ait0u5hi/gh-workflows/actions/detect-changes@v2
   with:
     filters: |
       python: **/*.py pyproject.toml
@@ -202,40 +207,45 @@ The cross-platform linter + attribution pattern are adapted from
 The library is generic (see the *Generic CI* table), but the distribution is
 wired to this org. To adopt in a fork under `<your-org>`:
 
-1. **Fork this repo** and tag it `v1` (`git tag v1 && git push origin v1`), so
-   your callers can pin `<your-org>/gh-workflows/...@v1`.
+1. **Fork this repo** and tag it `v2` (`git tag v2 && git push origin v2`), so
+   your callers can pin `<your-org>/gh-workflows/...@v2`.
 2. **Repoint every `uses:`** in the stubs you copy from `Ait0u5hi/gh-workflows`
    to `<your-org>/gh-workflows`. The [`examples/`](examples/) stubs already use a
    `<your-org>` placeholder for exactly this.
-3. **Edit `templates/zizmor.yml`** — its policy allows the `@v1` ref-pin for
+3. **Edit `templates/zizmor.yml`** — its policy allows the `@v2` ref-pin for
    `"Ait0u5hi/*"`; change that to `"<your-org>/*"` or the meta-lint rejects your
    own reusables.
 4. **`reusable-security.yml`**: `gitleaks-action` requires a `GITLEAKS_LICENSE`
    secret for **organizations** (free for individual accounts + public repos);
    pass it as `secrets: GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}`. A
    repo-local `.gitleaks.toml` is ignored unless you set `use-repo-config: true`.
-5. **Hardcoded self-references** — repoint these to `<your-org>` in your fork:
-   - `reusable-content-scan.yml` → `Ait0u5hi/gh-workflows/actions/content-scan@v1`
-   - `reusable-crossplatform-lint.yml` → `Ait0u5hi/gh-workflows/actions/windows-footguns@v1`
-   - `reusable-repo-docs.yml`, `reusable-doc-commands.yml` → `repository: Ait0u5hi/gh-workflows`
-   - `scripts/check-repo-docs.py` → its "Templates to copy" link
-   The governance reusables also assume the `contributors/emails/` layout —
-   adopt them only if you want the org standard.
+5. **Self-references need no edits.** The reusables reach their own composite
+   actions with `uses: $/actions/...` and check out their own scripts at
+   `job.workflow_repository` / `job.workflow_sha`, so a fork runs its own code
+   automatically. Only `scripts/check-repo-docs.py`'s "Templates to copy" link
+   names Ait0u5hi. The governance reusables also assume the
+   `contributors/emails/` layout — adopt them only if you want the org standard.
+6. **github.com only.** `$/` and `job.workflow_*` are not available on GitHub
+   Enterprise Server.
 
 ## Versioning
 
-Callers pin `@v1` (governance stubs may pin `@main` while bootstrapping).
+Callers pin `@v2` (governance stubs may pin `@main` while bootstrapping).
 Moving-major-tag convention, same as official actions:
 
-- compatible change → retag: `git tag -f v1 && git push -f origin v1`
-- breaking change (renamed/removed input, changed behavior) → new `v2` tag,
+- compatible change → retag: `git tag -f v2 && git push -f origin v2`
+- breaking change (renamed/removed input, changed behavior) → new `v3` tag,
   migrate callers deliberately
 
-Because `v1` moves, protect it: a tag ruleset on `v*` (no deletion, no
+`v1` is **frozen** at `b43f688` and gets no backports, security fixes
+included; see the [v1 → v2 migration notes](CHANGELOG.md#v2--2026-11-11).
+
+Because `v2` moves, protect it: a tag ruleset on `v*` (no deletion, no
 force-push except by maintainers) keeps a compromised token from swapping the
 code every caller runs. Callers who need immutability can pin a commit SHA
-instead of `@v1` — note that the composite actions and `tools-ref` inside the
-reusables still resolve `v1` today.
+instead of `@v2`: since v2 the reusables reach their own composite actions
+(`uses: $/...`) and scripts (`job.workflow_sha`) at that same commit, so a SHA
+pin now covers everything the workflow runs.
 
 ## Security model
 
@@ -253,8 +263,21 @@ reusables still resolve `v1` today.
   `gitleaks:allow`, `# windows-footgun: ok`) are still honoured — they are
   visible in the diff, so review them like code.
 - **Release tags are validated** before they reach a shell (`reusable-release.yml`).
-- **Self-hosted runners** must be ephemeral for anything that runs PR code (see
-  above).
+- **Self-hosted runners.** The reusables that run PR code fail when a PR from
+  another repository (or a comment trigger) lands on a self-hosted runner.
+  That only catches honest misconfiguration: on `pull_request` the PR author
+  controls the calling workflow and can simply not call the reusable, or add
+  a job of their own. The controls that actually stop untrusted code on your
+  machines are settings: keep self-hosted runner groups closed to public
+  repositories, require approval for **all** outside contributors' workflow
+  runs, and use ephemeral (just-in-time) runners.
+- **Tool binaries are pinned and verified.** ripgrep, lychee, git-cliff and
+  golangci-lint are downloaded at fixed versions and checked against
+  hard-coded SHA-256s; this repo's own pip tools install with
+  `--require-hashes`. A weekly job (`tool-pins.yml`) fails when a pin falls
+  behind upstream. Residual risk: the osv-scanner and super-linter actions
+  pull their Docker images by tag, which a SHA pin on the action does not
+  freeze.
 
 ## Docs
 
@@ -278,8 +301,7 @@ as the one super-linter component the targeted setup lacked.
 
 Third-party actions are kept to a minimum: where a tool ships a release binary,
 the reusables download it at a pinned version and verify its SHA-256 instead of
-running a third-party action (lychee, git-cliff, ripgrep, golangci-lint's
-installer by commit SHA).
+running a third-party action (lychee, git-cliff, ripgrep, golangci-lint).
 
 Distribution is copy-a-stub + reusable `workflow_call` (works on a personal
 account). GitHub's native *New workflow* template picker is Organization-only;

@@ -17,6 +17,11 @@
 version: 2
 updates:
   - package-ecosystem: "github-actions"
+    # Wait a week before proposing a freshly published version, so a
+    # compromised release has time to be caught and yanked. Security
+    # updates are not delayed by this.
+    cooldown:
+      default-days: 7
     directory: "/"
     schedule:
       interval: "weekly"

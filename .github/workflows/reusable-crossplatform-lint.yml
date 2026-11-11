@@ -7,14 +7,21 @@
 # a second checkout of this repo) so it resolves with the same grant that already
 # loaded this reusable workflow — one fetch, no extra token.
 #
-# This is an opt-in Ait0u5hi governance workflow: the composite-action ref below
-# is hardcoded to this repo. An external fork must repoint the `uses:` at its own
-# org, or the check runs against Ait0u5hi's linter rather than the fork's.
+# The composite action is referenced with GitHub's self-repository syntax
+# (`uses: $/actions/...`), which resolves to THIS repository at the commit the
+# caller pinned this reusable workflow to — so `@v2`, `@main` or a SHA all get
+# the matching linter, and a fork runs its own linter with no edits.
 name: Cross-platform lint (reusable)
 
 on:
   workflow_call:
     inputs:
+      allow-untrusted-prs-on-self-hosted:
+        description: >-
+          Allow this job to run code from a fork (or another repository's) PR when
+          runs-on is a self-hosted runner. Only safe on ephemeral, single-use runners.
+        type: boolean
+        default: false
       base-ref:
         description: Base branch to diff changed files against.
         type: string
@@ -32,16 +39,45 @@ jobs:
     runs-on: ${{ inputs.runs-on }}
     timeout-minutes: 10
     steps:
+      - name: Refuse untrusted PR code on a self-hosted runner
+        # Misconfiguration guard, NOT a security boundary: on pull_request the
+        # PR author controls the calling workflow and can drop this call. The
+        # controls that actually stop it are repo/org settings (README ->
+        # Security model). Runs before checkout, so no PR code has run yet.
+        if: ${{ runner.environment == 'self-hosted' && !inputs.allow-untrusted-prs-on-self-hosted }}
+        # bash explicitly (a Windows runner defaults to pwsh); written for
+        # bash 3.2 too (macOS), so no ${var,,}.
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || github.event.workflow_run.head_repository.full_name }}
+          THIS_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            pull_request* | workflow_run)
+              # A deleted head repo gives an empty HEAD_REPO: treated as foreign.
+              head=$(printf '%s' "$HEAD_REPO" | tr '[:upper:]' '[:lower:]')
+              this=$(printf '%s' "$THIS_REPO" | tr '[:upper:]' '[:lower:]')
+              if [ "$head" != "$this" ]; then
+                echo "::error::refusing PR code from ${HEAD_REPO:-a deleted repo} on a self-hosted runner"
+                echo "Use ephemeral runners and set allow-untrusted-prs-on-self-hosted to opt in."
+                exit 1
+              fi
+              ;;
+            issue_comment)
+              echo "::error::refusing comment-triggered PR code on a self-hosted runner"
+              exit 1
+              ;;
+          esac
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Scan changed Python for Windows footguns
-        # Same-repo composite action, versioned by the same tag as this reusable
-        # workflow (they move together on release), so a commit-hash pin would be
-        # self-referential and churn on every change. External forks: repoint the
-        # org in this `uses:` (see the header note).
-        uses: Ait0u5hi/gh-workflows/actions/windows-footguns@v1  # zizmor: ignore[unpinned-uses]
+        # `$/` = this repository at the commit this reusable workflow runs from
+        # (github.com, runner >= 2.336.0). No @ref: the ref IS the caller's pin.
+        uses: $/actions/windows-footguns
         with:
           base-ref: ${{ inputs.base-ref }}

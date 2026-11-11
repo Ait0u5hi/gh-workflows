@@ -54,7 +54,7 @@ on:
   pull_request:
 jobs:
   ci:
-    uses: <org>/gh-workflows/.github/workflows/reusable-python-ci.yml@v1
+    uses: <org>/gh-workflows/.github/workflows/reusable-python-ci.yml@v2
 ```
 
 Each `<name>.properties.json` controls how the template appears in the picker.
@@ -78,18 +78,16 @@ root files that gate/suggest the template).
 ## Migration steps
 
 1. Create the Organization (or convert `Ait0u5hi` to one).
-2. Transfer or fork `gh-workflows` into `<org>/gh-workflows`; re-create the `v1`
+2. Transfer or fork `gh-workflows` into `<org>/gh-workflows`; re-create the `v2`
    tag there.
 3. Create the `<org>/.github` repo; add `workflow-templates/` with a `<name>.yml`
    + `<name>.properties.json` pair per generic template (Python CI, Node CI,
-   Go CI, CodeQL). Point each `uses:` at `<org>/gh-workflows/...@v1`.
-4. Repoint the self-references **inside this repo**, then retag `v1`:
-   - `uses: Ait0u5hi/gh-workflows/actions/…@v1` in `reusable-content-scan.yml`
-     and `reusable-crossplatform-lint.yml`;
-   - `repository: Ait0u5hi/gh-workflows` in `reusable-repo-docs.yml` and
-     `reusable-doc-commands.yml`;
-   - the links in `scripts/check-repo-docs.py`, `CONTRIBUTING.md`,
-     `templates/CONTRIBUTING.md`, and every `uses:` in `templates/`.
+   Go CI, CodeQL). Point each `uses:` at `<org>/gh-workflows/...@v2`.
+4. Repoint the remaining `Ait0u5hi` names **inside this repo**, then retag `v2`:
+   the links in `scripts/check-repo-docs.py`, `CONTRIBUTING.md`,
+   `templates/CONTRIBUTING.md`, and every `uses:` in `templates/` and
+   `examples/`. The reusables' own self-references (`$/actions/...`,
+   `job.workflow_*`) follow the repository automatically.
    `rg -uu 'Ait0u5hi/' --glob '!.git'` lists what's left.
 5. Bulk-update caller `uses:` refs in consumer repos from `Ait0u5hi/*` to
    `<org>/*`.

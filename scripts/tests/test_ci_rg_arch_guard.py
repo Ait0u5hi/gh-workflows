@@ -70,8 +70,8 @@ class RgArchGuard(unittest.TestCase):
             "PATH": f"{self.stub_dir}:/usr/bin:/bin",
             "RUNNER_ARCH": runner_arch,
             "RUNNER_TEMP": str(runner_temp),
-            "RG_VERSION": "14.1.1",
-            "RG_SHA256_AMD64": "4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e",
+            "RG_VERSION": "15.2.0",
+            "RG_SHA256_AMD64": "33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c",
             "SENTINEL_LOG": str(self.sentinel_log),
         }
         return subprocess.run(
@@ -111,6 +111,25 @@ class RgArchGuard(unittest.TestCase):
         # accept "X64-ish" or be bypassable).
         self.assertIn('"$RUNNER_ARCH" != "X64"', self.run_script)
         self.assertIn("exit 1", self.run_script)
+
+
+class RgPinsAgree(unittest.TestCase):
+    """ci.yml's test ripgrep and the content-scan action's ripgrep must be the
+    same release with the same x86_64 hash, or the tests exercise a binary the
+    action never ships."""
+
+    def test_ci_and_action_pin_the_same_ripgrep(self):
+        import yaml
+
+        repo = Path(__file__).resolve().parents[2]
+        ci = yaml.safe_load((repo / ".github/workflows/ci.yml").read_text())
+        ci_env = next(s["env"] for s in ci["jobs"]["unit-tests"]["steps"]
+                      if "RG_VERSION" in s.get("env", {}))
+        action = yaml.safe_load((repo / "actions/content-scan/action.yml").read_text())
+        act_env = next(s["env"] for s in action["runs"]["steps"]
+                       if "RG_VERSION" in s.get("env", {}))
+        self.assertEqual(ci_env["RG_VERSION"], act_env["RG_VERSION"])
+        self.assertEqual(ci_env["RG_SHA256_AMD64"], act_env["RG_SHA256_AMD64"])
 
 
 if __name__ == "__main__":

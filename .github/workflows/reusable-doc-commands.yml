@@ -13,14 +13,11 @@ on:
     inputs:
       tools-ref:
         description: >-
-          gh-workflows ref to fetch the checker script from. Defaults to v1. Pass 'main' while
-          bootstrapping a checker that has not been released to v1 yet, or a SHA when gh-workflows
-          checks ITSELF - otherwise it would validate the released script rather than the one in
-          the PR, and a PR that broke the checker would still pass. Fully qualified by default
-          (refs/tags/v1): a bare "v1" is resolved as a branch before a tag, so anyone able to
-          push a branch named v1 could otherwise swap the checker every caller runs.
+          Override for the gh-workflows ref the checker script is fetched from. Leave empty
+          (the default): the script then comes from the same commit as this reusable workflow
+          (job.workflow_sha), so it always matches the caller's pin.
         type: string
-        default: refs/tags/v1
+        default: ''
       paths:
         description: Space-separated markdown files to check.
         type: string
@@ -50,8 +47,10 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-          repository: Ait0u5hi/gh-workflows
-          ref: ${{ inputs.tools-ref }}
+          # This reusable workflow's own repository and commit (not the
+          # caller's): the checker always matches the pinned workflow.
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ inputs.tools-ref || job.workflow_sha }}
           path: .gh-workflows-tools
           sparse-checkout: scripts
           sparse-checkout-cone-mode: false
