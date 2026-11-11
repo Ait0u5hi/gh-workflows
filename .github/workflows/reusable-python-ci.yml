@@ -16,7 +16,7 @@ on:
       python-versions:
         description: JSON array of Python versions for the pytest matrix.
         type: string
-        default: '["3.10","3.11","3.12","3.13"]'
+        default: '["3.11","3.12","3.13","3.14"]'
       run-ruff:
         description: Run ruff lint (once, on the default runner Python).
         type: boolean

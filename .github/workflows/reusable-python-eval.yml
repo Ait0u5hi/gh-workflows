@@ -10,7 +10,7 @@ on:
         default: ubuntu-latest
       python-version:
         type: string
-        default: "3.10"
+        default: "3.12"
       extra-deps:
         description: Space-separated pip packages installed alongside pytest
         type: string

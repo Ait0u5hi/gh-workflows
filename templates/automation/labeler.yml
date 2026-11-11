@@ -1,5 +1,5 @@
 # Starter labeler config — copy to .github/labeler.yml and adjust paths.
-# actions/labeler v5 syntax.
+# actions/labeler v5+ syntax (unchanged through v7).
 docs:
   - changed-files:
       - any-glob-to-any-file: ["**/*.md", "docs/**"]

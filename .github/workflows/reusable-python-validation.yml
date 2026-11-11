@@ -11,7 +11,7 @@ on:
         default: ubuntu-latest
       python-version:
         type: string
-        default: "3.10"
+        default: "3.12"
       plugin-validate:
         description: Validate plugin.yaml + compileall (Hermes plugin repos)
         type: boolean
