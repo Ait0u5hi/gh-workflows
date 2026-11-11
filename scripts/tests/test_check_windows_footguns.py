@@ -239,11 +239,11 @@ class FixtureNotPythonTests(unittest.TestCase):
 
 
 class SuppressionMarkerScopeTests(unittest.TestCase):
-    """(b): confirm the existing `# windows-footgun: ok` marker's semantics
-    before relying on it for N1. It is checked per LINE (SUPPRESS_MARKER
-    is tested inside the per-line loop in scan_file), not per file and not
-    for a following block. A second, unmarked line with the same footgun
-    right after a suppressed one must still be flagged."""
+    """The `# windows-footgun: ok` marker covers the STATEMENT whose comment
+    carries it (every row of a multi-line statement; see
+    TokenizerMaskTests.test_marker_covers_a_multi_line_statement), never
+    the file or a following block: a second, unmarked statement with the
+    same footgun right after a suppressed one must still be flagged."""
 
     def test_marker_suppresses_only_its_own_line(self):
         # "os." and "killpg(" are concatenated at runtime, never adjacent
@@ -427,6 +427,69 @@ class PathHandlingTests(unittest.TestCase):
             with mock.patch.object(Path, "read_text", side_effect=PermissionError(13, "Permission denied")):
                 rc = mod.main([str(target)])
             self.assertEqual(rc, 2)
+
+class ReviewRegressionTests(unittest.TestCase):
+    """Cases from the pre-merge review of the tokenizer rewrite."""
+
+    scan = TokenizerMaskTests.scan
+    assertFlaggedAt = TokenizerMaskTests.assertFlaggedAt
+
+    def test_other_calls_encoding_or_kwargs_in_the_statement_do_not_excuse_open(self):
+        for src in ("df = read_csv(\n    OPEN(path),\n    encoding='utf-8',\n)\n",
+                    "call(\n    OPEN(path),\n    **opts,\n)\n",
+                    "x = (OPEN(a, encoding='utf-8'),\n     OPEN(b))\n"):
+            with self.subTest(src=src):
+                self.assertFlaggedAt(self.scan(src.replace("OPEN(", "open(")), 2)
+
+    def test_open_at_column_zero_of_a_continuation_row_is_judged_itself(self):
+        src = "x = [\nOPEN(a),\n  OPEN(b, encoding='utf-8')]\n".replace("OPEN(", "open(")
+        self.assertFlaggedAt(self.scan(src), 2)
+
+    def test_fstring_field_code_is_scanned_on_every_python(self):
+        self.assertFlaggedAt(self.scan("import os\nx = f'{" + KILLPG + "}'\n"), 2)
+
+    def test_a_huge_single_statement_scans_in_linear_time(self):
+        import time
+        rows = "".join(f"    'k{i}': 'v{i}',\n" for i in range(30000))
+        start = time.monotonic()
+        proc = self.scan("D = {\n" + rows + "}\n")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertLess(time.monotonic() - start, 20, "statement handling went quadratic")
+
+    def test_dangling_symlink_in_a_walked_dir_is_skipped_like_an_explicit_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "ok.py").write_text("x = 1\n", encoding="utf-8")
+            (root / "gone.py").symlink_to("missing.py")
+            for args in (["."], ["gone.py", "ok.py"]):
+                with self.subTest(args=args):
+                    proc = run_script(args, root)
+                    self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_diff_from_a_subdirectory_under_a_build_named_checkout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "build" / "repo"
+            (repo / "pkg").mkdir(parents=True)
+            git = ["git", "-c", "user.name=t", "-c", "user.email=t@t"]
+            subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+            (repo / "pkg" / "base.py").write_text("x = 1\n", encoding="utf-8")
+            subprocess.run([*git, "-C", str(repo), "add", "-A"], check=True)
+            subprocess.run([*git, "-C", str(repo), "commit", "-qm", "base"], check=True)
+            subprocess.run([*git, "-C", str(repo), "checkout", "-qb", "pr"], check=True)
+            # The changed file is OUTSIDE the cwd (repo/pkg), so it can't be
+            # made relative to the cwd: the exclusion must use the repo root.
+            (repo / "lib").mkdir()
+            (repo / "lib" / "mod.py").write_text(f"import os\n{KILLPG}\n", encoding="utf-8")
+            subprocess.run([*git, "-C", str(repo), "add", "-A"], check=True)
+            subprocess.run([*git, "-C", str(repo), "commit", "-qm", "pr"], check=True)
+            # The checker resolves --diff paths against its own REPO_ROOT, so
+            # run a copy of it from inside the repo.
+            (repo / "scripts").mkdir()
+            (repo / "scripts" / "check.py").write_text(SCRIPT.read_text(encoding="utf-8"), encoding="utf-8")
+            proc = subprocess.run([sys.executable, str(repo / "scripts" / "check.py"), "--diff", "main"],
+                                  cwd=repo / "pkg", capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("mod.py:2:", proc.stdout)
 
 
 if __name__ == "__main__":

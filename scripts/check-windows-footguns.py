@@ -45,8 +45,8 @@ How it reads code: each file is tokenized (stdlib `tokenize`). Comments and
 triple-quoted strings (docstrings) are blanked before matching; rules that
 name a Python API also ignore the contents of ordinary string literals,
 while path/command rules (~/Desktop, wmic, ./script) match inside them. A
-`# windows-footgun: ok` marker is honoured only in a real comment, and
-covers every physical line of the statement it ends. A file that does not
+`# windows-footgun: ok` marker is honoured only in a real comment, and a
+marker on any row of a multi-line statement covers the whole statement. A file that does not
 tokenize is scanned line by line with only `#` comments stripped (it can
 only report more, never less).
 
@@ -180,10 +180,11 @@ class Footgun:
     # Optional post-match predicate. Takes the re.Match and returns True
     # if the match is a REAL footgun (not a false positive). Use this when
     # the regex can't fully distinguish (e.g. open() where mode may contain
-    # "b" for binary, or the line may have `encoding=` elsewhere). It is
-    # given the "keep" view of the line (comments and triple-quoted blocks
-    # blanked, ordinary string literals intact), column-aligned with the
-    # raw line.
+    # "b" for binary). Called as post_filter(text, head_end): `text` is the
+    # "keep" view (comments and triple-quoted blocks blanked, ordinary string
+    # literals intact) of the whole logical statement the match is in, rows
+    # joined with one space, and `head_end` is the index in `text` just past
+    # the match's `head` group (for open(): just after the paren).
     post_filter: "callable | None" = None
     # True for rules whose evidence lives INSIDE string literals (a path
     # like "~/Desktop", "wmic", "./script"). Those search the "keep" view.
@@ -253,9 +254,8 @@ def _split_call_args(line: str, start: int) -> list[str]:
 _STR_LITERAL = re.compile(r"""^[rRbBuUfF]{0,2}(['"])(?P<body>.*)\1$""")
 
 
-def _open_call_parts(m: re.Match, line: str) -> tuple[str, str | None]:
-    """(first argument, literal mode or None) of the open() call matched by m."""
-    args = _split_call_args(line, m.end("head"))
+def _open_call_parts(args: list[str]) -> tuple[str, str | None]:
+    """(first argument, literal mode or None) of an open() call's arguments."""
     first = args[0] if args else ""
     mode_arg = None
     if len(args) > 1 and not re.match(r"^\w+\s*=(?!=)", args[1]):
@@ -268,23 +268,24 @@ def _open_call_parts(m: re.Match, line: str) -> tuple[str, str | None]:
     return first, (lit.group("body") if lit else None)
 
 
-def _open_is_text_footgun(m: re.Match, line: str) -> bool:
-    first, mode = _open_call_parts(m, line)
-    return (
-        "b" not in (mode or "")
-        and "encoding=" not in line
-        and "encoding =" not in line
-        # Skip `def open(` and `async def open(` (method definitions)
-        and not line.lstrip().startswith("def ")
-        and not line.lstrip().startswith("async def ")
-        # Skip open(path, **kwargs) patterns — encoding may be in the dict.
-        # Too expensive to trace; require the author to set encoding in
-        # the dict and trust them (or they can add a # windows-footgun: ok).
-        and "**" not in line
-        # Skip literal Linux pseudo-files (/proc/..., /sys/...): they
-        # exist only on Linux and are always ASCII, so encoding is moot.
-        and not _is_pseudo_file_arg(first)
-    )
+def _open_is_text_footgun(text: str, head_end: int) -> bool:
+    """Decide from THIS call's own arguments only: an `encoding=` or `**`
+    belonging to another call in the same statement must not excuse it."""
+    stripped = text.lstrip()
+    # Skip `def open(` and `async def open(` (method definitions).
+    if stripped.startswith("def ") or stripped.startswith("async def "):
+        return False
+    args = _split_call_args(text, head_end)
+    if any(re.match(r"^encoding\s*=(?!=)", a) for a in args[1:]):
+        return False
+    # open(path, **kwargs): encoding may be in the dict. Too expensive to
+    # trace; trust the author (or they can add a # windows-footgun: ok).
+    if any(a.startswith("**") for a in args):
+        return False
+    first, mode = _open_call_parts(args)
+    # Binary mode needs no encoding. Literal Linux pseudo-files (/proc/...,
+    # /sys/...) exist only on Linux and are always ASCII, so encoding is moot.
+    return "b" not in (mode or "") and not _is_pseudo_file_arg(first)
 
 
 FOOTGUNS: list[Footgun] = [
@@ -481,11 +482,14 @@ def should_scan_file(path: Path, base: Path | None = None) -> bool:
     paths), never against the absolute path: a checkout that happens to live
     under e.g. /home/runner/work/build/build/ must not exclude every file.
     """
-    base = base if base is not None else Path.cwd()
-    try:
-        rel_parts = path.relative_to(base).parts
-    except ValueError:
-        rel_parts = path.parts
+    bases = [base] if base is not None else [Path.cwd(), REPO_ROOT]
+    rel_parts = path.parts
+    for b in bases:
+        try:
+            rel_parts = path.relative_to(b).parts
+            break
+        except ValueError:
+            continue
     if set(rel_parts) & EXCLUDED_DIRS:
         return False
     # Skip excluded suffixes
@@ -515,6 +519,10 @@ def iter_files(paths: Iterable[Path]) -> Iterable[Path]:
                 dirs[:] = [d for d in dirs if d not in EXCLUDED_DIRS]
                 for fname in files:
                     fpath = Path(root) / fname
+                    # A dangling symlink is skipped here exactly as it is
+                    # when named explicitly (is_file() is False for it).
+                    if not fpath.is_file():
+                        continue
                     if should_scan_file(fpath, base=p):
                         yield fpath
 
@@ -562,6 +570,7 @@ _FMIDDLE = {t for t in (getattr(tokenize, "FSTRING_MIDDLE", None),
 _FEND = {t for t in (getattr(tokenize, "FSTRING_END", None),
                      getattr(tokenize, "TSTRING_END", None)) if t is not None}
 _PREFIX_CHARS = "rRbBuUfFtT"
+_LEGACY_FSTRINGS = sys.version_info < (3, 12)
 
 
 def _is_triple(token_text: str) -> bool:
@@ -590,8 +599,9 @@ class _Views:
            (prefix and quotes kept).
     comments: row -> COMMENT token texts on that row.
     statement: row -> (first_row, last_row) of the logical statement that
-           row belongs to, so a suppression marker anywhere on a multi-line
-           statement covers all of it (flake8 `noqa` semantics).
+           row belongs to: a suppression marker in a comment on ANY row of a
+           multi-line statement covers every row of it (flake8 `noqa`
+           semantics), and post_filters see the whole statement.
     """
 
     keep: list[str]
@@ -636,6 +646,10 @@ def _build_views(lines: list[str]) -> _Views | None:
             if _is_triple(ttext):
                 _blank(keep, start, end)
                 _blank(blank, start, end)
+            elif _LEGACY_FSTRINGS and "f" in ttext[: len(ttext) - len(ttext.lstrip(_PREFIX_CHARS))].lower():
+                # Before 3.12 an f-string is ONE STRING token, so blanking it
+                # would also hide the code in its {...} fields. Leave it.
+                pass
             else:
                 body = ttext.lstrip(_PREFIX_CHARS)
                 open_len = len(ttext) - len(body) + 1  # prefix + one quote
@@ -682,18 +696,36 @@ def scan_file(path: Path, footguns: list[Footgun]) -> tuple[list[tuple[int, str,
 
     matches: list[tuple[int, str, Footgun]] = []
     suppressed = 0
-    for i, raw in enumerate(lines, start=1):
+    # Per-statement data, computed once and only when a rule matches there
+    # (a 16k-row literal must not cost O(rows^2)).
+    stmt_cache: dict[tuple[int, int], tuple[bool, str, list[int]]] = {}
+
+    def statement_info(i: int) -> tuple[bool, str, int]:
+        """(suppressed?, keep text of the statement, column offset of row i)."""
         if views is None:
-            keep = blank = _strip_code(raw)
-            marked = bool(SUPPRESS_MARKER.search(raw))
-        else:
-            keep, blank = views.keep[i - 1], views.blank[i - 1]
-            first, last = views.statement.get(i, (i, i))
+            return bool(SUPPRESS_MARKER.search(lines[i - 1])), _strip_code(lines[i - 1]), 0
+        span = views.statement.get(i, (i, i))
+        if span not in stmt_cache:
+            first, last = span
             marked = any(
                 SUPPRESS_MARKER.search(c)
                 for r in range(first, last + 1)
                 for c in views.comments.get(r, ())
             )
+            rows = views.keep[first - 1:last]
+            offsets, pos = [], 0
+            for row in rows:
+                offsets.append(pos)
+                pos += len(row) + 1  # rows are joined with one space
+            stmt_cache[span] = (marked, " ".join(rows), offsets)
+        marked, text, offsets = stmt_cache[span]
+        return marked, text, offsets[i - span[0]]
+
+    for i, raw in enumerate(lines, start=1):
+        if views is None:
+            keep = blank = _strip_code(raw)
+        else:
+            keep, blank = views.keep[i - 1], views.blank[i - 1]
         if not keep.strip():
             continue
         # A guard hint counts only in code (not in a comment): e.g.
@@ -706,23 +738,12 @@ def scan_file(path: Path, footguns: list[Footgun]) -> tuple[list[tuple[int, str,
             match = fg.pattern.search(keep if fg.needs_strings else blank)
             if not match:
                 continue
+            marked, stmt_text, row_offset = statement_info(i)
             if fg.post_filter is not None:
-                f_match, f_text = match, keep
-                if views is not None:
-                    first, last = views.statement.get(i, (i, i))
-                    if last > first:
-                        # Judge the whole logical statement, so a call whose
-                        # arguments (e.g. `encoding=`) continue on later rows
-                        # is read in full. Rows are joined with one space, so
-                        # columns shift by a fixed per-row offset.
-                        offset = sum(len(views.keep[r - 1]) + 1 for r in range(first, i))
-                        f_text = " ".join(views.keep[first - 1:last])
-                        joined = " ".join((views.keep if fg.needs_strings else views.blank)[first - 1:last])
-                        f_match = fg.pattern.search(joined, offset + match.start()) or match
-                        if f_match is match:
-                            f_text = keep
                 try:
-                    if not fg.post_filter(f_match, f_text):
+                    # Views are column-aligned, so the row's column plus the
+                    # row's offset is the same position in the statement.
+                    if not fg.post_filter(stmt_text, row_offset + match.end("head")):
                         continue
                 except (IndexError, AttributeError):
                     # Post-filter assumed a named group that isn't there — skip.
