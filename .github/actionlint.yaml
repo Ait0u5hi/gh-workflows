@@ -1,0 +1,24 @@
+# actionlint config for this repo's self-CI.
+#
+# The reusable workflows reference this repository's own composite actions and
+# scripts with GitHub's native self-reference features (github.com, July 2026):
+#   - `uses: $/actions/<name>` — resolves to this repo at the running commit;
+#   - `job.workflow_repository` / `job.workflow_sha` — this reusable workflow's
+#     own repo and commit, for checking out its helper scripts.
+# actionlint 1.7.12 (latest release) knows neither yet; upstream support is in
+# rhysd/actionlint#732 ($/ syntax) and #707 (job.workflow_*). Until a release
+# ships them, ignore EXACTLY those two errors in EXACTLY these files.
+# scripts/tests/test_actionlint_ignores.py keeps this list from growing.
+paths:
+  .github/workflows/reusable-content-scan.yml:
+    ignore:
+      - 'specifying action "\$/actions/content-scan" in invalid format because ref is missing'
+  .github/workflows/reusable-crossplatform-lint.yml:
+    ignore:
+      - 'specifying action "\$/actions/windows-footguns" in invalid format because ref is missing'
+  .github/workflows/reusable-repo-docs.yml:
+    ignore:
+      - 'property "workflow_(repository|sha)" is not defined in object type \{check_run_id'
+  .github/workflows/reusable-doc-commands.yml:
+    ignore:
+      - 'property "workflow_(repository|sha)" is not defined in object type \{check_run_id'

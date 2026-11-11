@@ -7,9 +7,10 @@
 # a second checkout of this repo) so it resolves with the same grant that already
 # loaded this reusable workflow — one fetch, no extra token.
 #
-# This is an opt-in Ait0u5hi governance workflow: the composite-action ref below
-# is hardcoded to this repo. An external fork must repoint the `uses:` at its own
-# org, or the check runs against Ait0u5hi's linter rather than the fork's.
+# The composite action is referenced with GitHub's self-repository syntax
+# (`uses: $/actions/...`), which resolves to THIS repository at the commit the
+# caller pinned this reusable workflow to — so `@v2`, `@main` or a SHA all get
+# the matching linter, and a fork runs its own linter with no edits.
 name: Cross-platform lint (reusable)
 
 on:
@@ -54,7 +55,8 @@ jobs:
             pull_request* | workflow_run)
               # A deleted head repo gives an empty HEAD_REPO: treated as foreign.
               if [ "${HEAD_REPO,,}" != "${THIS_REPO,,}" ]; then
-                echo "::error::refusing to run PR code from ${HEAD_REPO:-a deleted repository} on a self-hosted runner (use ephemeral runners and set allow-untrusted-prs-on-self-hosted to opt in)"
+                echo "::error::refusing PR code from ${HEAD_REPO:-a deleted repo} on a self-hosted runner"
+                echo "Use ephemeral runners and set allow-untrusted-prs-on-self-hosted to opt in."
                 exit 1
               fi
               ;;
@@ -69,10 +71,8 @@ jobs:
           persist-credentials: false
 
       - name: Scan changed Python for Windows footguns
-        # Same-repo composite action, versioned by the same tag as this reusable
-        # workflow (they move together on release), so a commit-hash pin would be
-        # self-referential and churn on every change. External forks: repoint the
-        # org in this `uses:` (see the header note).
-        uses: Ait0u5hi/gh-workflows/actions/windows-footguns@v1  # zizmor: ignore[unpinned-uses]
+        # `$/` = this repository at the commit this reusable workflow runs from
+        # (github.com, runner >= 2.336.0). No @ref: the ref IS the caller's pin.
+        uses: $/actions/windows-footguns
         with:
           base-ref: ${{ inputs.base-ref }}

@@ -4,7 +4,7 @@ These are copy-paste caller stubs for **external adopters**. They differ from
 [`templates/`](../templates/) in one way: every `uses:` points at a placeholder
 `<your-org>/gh-workflows`. If you fork this repo, replace `<your-org>` with your
 own login/org in each stub. (The `templates/` stubs are the Ait0u5hi-internal
-copies, already pinned at `Ait0u5hi/gh-workflows@v1`.)
+copies, already pinned at `Ait0u5hi/gh-workflows@v2`.)
 
 Adoption is: copy a stub into `.github/workflows/`, copy
 [`templates/zizmor.yml`](../templates/zizmor.yml) to `.github/zizmor.yml` (and
@@ -32,7 +32,7 @@ permissions:
   contents: read
 jobs:
   ci:
-    uses: <your-org>/gh-workflows/.github/workflows/reusable-python-ci.yml@v1
+    uses: <your-org>/gh-workflows/.github/workflows/reusable-python-ci.yml@v2
     # with:
     #   python-versions: '["3.11","3.12"]'
     #   test-command: "python -m pytest -q"
@@ -55,7 +55,7 @@ permissions:
   contents: read
 jobs:
   ci:
-    uses: <your-org>/gh-workflows/.github/workflows/reusable-node-ci.yml@v1
+    uses: <your-org>/gh-workflows/.github/workflows/reusable-node-ci.yml@v2
     with:
       node-versions: '["22","24"]'
       # run-typecheck: true
@@ -85,11 +85,11 @@ permissions:
   actions: read
 jobs:
   codeql:
-    uses: <your-org>/gh-workflows/.github/workflows/reusable-codeql.yml@v1
+    uses: <your-org>/gh-workflows/.github/workflows/reusable-codeql.yml@v2
     # with:
     #   languages: '["python","javascript-typescript"]'
   osv:
-    uses: <your-org>/gh-workflows/.github/workflows/reusable-osv.yml@v1
+    uses: <your-org>/gh-workflows/.github/workflows/reusable-osv.yml@v2
 ```
 
 ## Secret scanning (gitleaks)
@@ -110,7 +110,7 @@ permissions:
   pull-requests: read
 jobs:
   gitleaks:
-    uses: <your-org>/gh-workflows/.github/workflows/reusable-security.yml@v1
+    uses: <your-org>/gh-workflows/.github/workflows/reusable-security.yml@v2
 ```
 
 ## Release (git-cliff changelog + GitHub Release)
@@ -128,7 +128,7 @@ permissions:
   contents: write
 jobs:
   release:
-    uses: <your-org>/gh-workflows/.github/workflows/reusable-release.yml@v1
+    uses: <your-org>/gh-workflows/.github/workflows/reusable-release.yml@v2
     # with:
     #   default-branch: master
 ```

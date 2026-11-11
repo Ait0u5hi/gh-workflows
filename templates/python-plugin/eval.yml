@@ -16,4 +16,4 @@ permissions:
 
 jobs:
   eval:
-    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-python-eval.yml@v1
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-python-eval.yml@v2

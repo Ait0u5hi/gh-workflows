@@ -196,12 +196,11 @@ class SelfLintTests(unittest.TestCase):
     redden that gate silently again. This is the test the gate itself
     would run, not a hand-picked excerpt.
 
-    Note this governance gate pins the composite action (and so the
-    checker it runs) to a tagged release (see FixtureNotPythonTests
-    below), not this repo's own HEAD. An EXCLUDED_FILES entry added here
-    would never reach that pinned checker, so the fixture is kept out of
-    scope by its file extension instead (see FixtureNotPythonTests);
-    nothing in EXCLUDED_FILES needs to name it."""
+    Since v2 the governance gate reaches the composite action with
+    `uses: $/actions/windows-footguns`, i.e. at the PR's own commit, so it
+    runs THIS checker. The fixture is still kept out of scope by its file
+    extension (see FixtureNotPythonTests) so no checker version, old or new,
+    ever scans it."""
 
     REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -212,20 +211,15 @@ class SelfLintTests(unittest.TestCase):
 
 
 class FixtureNotPythonTests(unittest.TestCase):
-    """N1: the governance gate (.github/workflows/pr-governance.yml ->
-    reusable-crossplatform-lint.yml) runs the windows-footguns composite
-    action at a pinned tag (e.g. @v1), which fetches the checker script
-    AT THAT TAG, not this repo's HEAD. A fix to check-windows-footguns.py
-    (an EXCLUDED_FILES entry, say) only reaches CI after the tag is
-    re-cut, which is not this card's call to make. The only fix that
-    works regardless of which tagged checker version runs is to keep the
-    vendored 709fabb fixture out of scope by construction: every checker
-    version (old and new alike) only looks at `*.py`/`*.pyw`/`*.pyi`
-    files (see should_scan_file), so a fixture with any other extension
-    is never scanned by any of them. The fixture was renamed to
-    check_windows_footguns_709fabb.py.txt for exactly this reason; this
-    test fails loudly if a future vendored fixture is ever added back
-    under a `.py` name."""
+    """N1: keep vendored fixtures out of the checker's scope by construction.
+    Every checker version (old and new alike) only looks at
+    `*.py`/`*.pyw`/`*.pyi` files (see should_scan_file), so a fixture with any
+    other extension is never scanned by any of them — including the
+    pre-v2 releases whose governance gate ran a tagged checker rather than
+    the PR's own. The vendored 709fabb fixture was renamed to
+    check_windows_footguns_709fabb.py.txt for exactly this reason; this test
+    fails loudly if a future vendored fixture is added back under a `.py`
+    name."""
 
     FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 

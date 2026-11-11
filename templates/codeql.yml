@@ -26,6 +26,6 @@ permissions:
 
 jobs:
   codeql:
-    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-codeql.yml@v1
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-codeql.yml@v2
     # with:
     #   languages: '["python","javascript-typescript"]'   # add JS/TS analysis

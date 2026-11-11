@@ -22,12 +22,14 @@ Of the four composite actions, only two could stand alone:
 - `actions/retry` — run a shell command with retries
 - `actions/detect-changes` — path-filter → job-gating map
 
-The other two depend on this repo's layout and are not standalone listings:
+The other two depend on this repo's layout and are not standalone listings
+(the reusables reach them with `uses: $/actions/...`, GitHub's
+self-repository syntax, so they always run at the caller's pinned commit):
 
 - `actions/windows-footguns` runs `scripts/check-windows-footguns.py` from this
   repo and encodes the org governance standard.
 - `actions/content-scan` is generic in purpose, but runs
-  `scripts/content-scan.sh` and `scripts/rg-need-install.sh` from this repo;
+  `scripts/content-scan.sh` from this repo;
   extracting it would mean vendoring those scripts into the action repo.
 
 ## Options
@@ -42,7 +44,7 @@ The other two depend on this repo's layout and are not standalone listings:
 
 **B. Status quo — keep actions in-repo, referenced by path.**
 - Pro: zero new maintenance surface; single source of truth; the actions were
-  built for intra-org reuse and that already works (`@v1`, README-documented).
+  built for intra-org reuse and that already works (`@v2`, README-documented).
 - Con: not discoverable outside anyone who reads this repo.
 
 ## Recommendation

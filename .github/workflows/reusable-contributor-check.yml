@@ -42,7 +42,9 @@ jobs:
         run: |
           set -euo pipefail
           if ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
-            echo "::error::the PR head commit is not in this checkout — call this reusable from a pull_request trigger (pull_request_target checks out the base branch, which never contains a fork's commits)"
+            echo "::error::the PR head commit is not in this checkout"
+            echo "Call this reusable from a pull_request trigger: pull_request_target checks out"
+            echo "the base branch, which never contains a fork's commits."
             exit 1
           fi
           MERGE_BASE=$(git merge-base "origin/${BASE_REF}" "${HEAD_SHA}")

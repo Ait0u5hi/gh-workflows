@@ -23,14 +23,21 @@ duplicates are common and a minute up front keeps the queue clean.
    inputs with defaults; deprecate before removing; call it out in the PR.
 4. **Pin third-party actions by commit SHA** (with a `# vX.Y.Z` comment), never a
    moving tag. Reusables in *this* repo may be referenced by callers as `@main`
-   (always-current) or `@v1` (stable).
+   (always-current) or `@v2` (stable). Inside the reusables, reach this repo's
+   own actions with `uses: $/actions/<name>` and its scripts via a checkout of
+   `job.workflow_repository` at `job.workflow_sha` — never a hard-coded
+   `Ait0u5hi/gh-workflows/...@vN`, which would run different code than the
+   caller pinned (`scripts/tests/test_self_references.py` enforces this).
+   actionlint doesn't know either feature yet; `.github/actionlint.yaml`
+   ignores exactly those errors in exactly those files (rhysd/actionlint#732,
+   #707) — don't widen it.
 5. **Lint and test clean.** CI (`.github/workflows/ci.yml`) runs exactly the checks below,
    at pinned versions; run them before pushing. actionlint is not vendored (it's gitignored) —
    fetch the pinned release with its installer, pinned by commit SHA:
    ```bash
    bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/914e7df21a07ef503a81201c76d2b11c789d3fca/scripts/download-actionlint.bash) 1.7.12
    ./actionlint -color
-   pip install yamllint==1.38.0 zizmor==1.32.0 pyyaml==6.0.3
+   pip install --require-hashes --only-binary :all: -r requirements/ci.txt
    yamllint .
    zizmor --no-online-audits .github/workflows/ actions/
    python3 -m unittest discover -s scripts/tests -t scripts/tests

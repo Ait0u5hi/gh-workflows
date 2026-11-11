@@ -45,7 +45,7 @@ source too, not just issues.
 2. **One concern per PR.** No unrelated commits riding along. A drive-by cleanup in a bug-fix PR
    makes the bug fix harder to review and harder to revert.
 3. **Pin third-party GitHub Actions by commit SHA**, with a `# vX.Y.Z` comment. A moving tag is a
-   supply-chain hole. Reusables from this org may be referenced as `@v1` or `@main`.
+   supply-chain hole. Reusables from this org may be referenced as `@v2` or `@main`.
 4. **Cross-platform Python.** No unguarded `os.killpg`, `signal.SIGKILL`, `os.fork`, or hardcoded
    `/tmp`. Use `tempfile`, `pathlib`, and `subprocess` timeouts. If a line is genuinely
    platform-gated, mark it `# windows-footgun: ok`. The `crossplatform-lint` check enforces this.

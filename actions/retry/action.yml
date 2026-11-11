@@ -1,6 +1,6 @@
 # Adapted from NousResearch/hermes-agent (MIT, (c) 2025 Nous Research):
 # .github/actions/retry. Generic — vendored unchanged so any Ait0u5hi workflow
-# can wrap a flaky step. Reference as Ait0u5hi/gh-workflows/actions/retry@v1.
+# can wrap a flaky step. Reference as Ait0u5hi/gh-workflows/actions/retry@v2.
 name: Retry a flaky command
 description: >-
   Run a shell command, retrying on non-zero exit. For dependency installs

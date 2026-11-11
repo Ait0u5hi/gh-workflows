@@ -49,7 +49,7 @@ permissions:
 
 jobs:
   content-scan:
-    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-content-scan.yml@v1
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-content-scan.yml@v2
     secrets:
       # Optional — omit this whole `secrets:` block if you only use the
       # committed patterns file. Create the secret at

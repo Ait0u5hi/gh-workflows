@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   osv:
-    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-osv.yml@v1
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-osv.yml@v2
     # To scan explicit lockfiles instead of the recursive default:
     # with:
     #   scan-args: "--lockfile=uv.lock --lockfile=package-lock.json"

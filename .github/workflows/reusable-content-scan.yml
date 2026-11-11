@@ -92,7 +92,8 @@ jobs:
             pull_request* | workflow_run)
               # A deleted head repo gives an empty HEAD_REPO: treated as foreign.
               if [ "${HEAD_REPO,,}" != "${THIS_REPO,,}" ]; then
-                echo "::error::refusing to run PR code from ${HEAD_REPO:-a deleted repository} on a self-hosted runner (use ephemeral runners and set allow-untrusted-prs-on-self-hosted to opt in)"
+                echo "::error::refusing PR code from ${HEAD_REPO:-a deleted repo} on a self-hosted runner"
+                echo "Use ephemeral runners and set allow-untrusted-prs-on-self-hosted to opt in."
                 exit 1
               fi
               ;;
@@ -105,7 +106,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: Ait0u5hi/gh-workflows/actions/content-scan@v1  # zizmor: ignore[unpinned-uses]
+      # `$/` = this repository at the commit this reusable workflow runs from,
+      # so the action always matches the caller's pin of this workflow.
+      - uses: $/actions/content-scan
         with:
           patterns-file: ${{ inputs.patterns-file }}
           patterns-secret: ${{ secrets.patterns }}

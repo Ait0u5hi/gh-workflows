@@ -74,7 +74,8 @@ jobs:
             pull_request* | workflow_run)
               # A deleted head repo gives an empty HEAD_REPO: treated as foreign.
               if [ "${HEAD_REPO,,}" != "${THIS_REPO,,}" ]; then
-                echo "::error::refusing to run PR code from ${HEAD_REPO:-a deleted repository} on a self-hosted runner (use ephemeral runners and set allow-untrusted-prs-on-self-hosted to opt in)"
+                echo "::error::refusing PR code from ${HEAD_REPO:-a deleted repo} on a self-hosted runner"
+                echo "Use ephemeral runners and set allow-untrusted-prs-on-self-hosted to opt in."
                 exit 1
               fi
               ;;
@@ -140,7 +141,8 @@ jobs:
             pull_request* | workflow_run)
               # A deleted head repo gives an empty HEAD_REPO: treated as foreign.
               if [ "${HEAD_REPO,,}" != "${THIS_REPO,,}" ]; then
-                echo "::error::refusing to run PR code from ${HEAD_REPO:-a deleted repository} on a self-hosted runner (use ephemeral runners and set allow-untrusted-prs-on-self-hosted to opt in)"
+                echo "::error::refusing PR code from ${HEAD_REPO:-a deleted repo} on a self-hosted runner"
+                echo "Use ephemeral runners and set allow-untrusted-prs-on-self-hosted to opt in."
                 exit 1
               fi
               ;;
@@ -171,7 +173,8 @@ jobs:
         run: | # zizmor: ignore[github-env]
           set -euo pipefail
           if [ "$GOLANGCI_VERSION" != "$GOLANGCI_PINNED" ]; then
-            echo "::error::golangci-version '$GOLANGCI_VERSION' is not the pinned, hash-verified $GOLANGCI_PINNED; only that version is supported"
+            echo "::error::golangci-version '$GOLANGCI_VERSION' is not the pinned $GOLANGCI_PINNED"
+            echo "Only the pinned, hash-verified release is supported."
             exit 1
           fi
           if [ "$RUNNER_OS_NAME" != "Linux" ]; then

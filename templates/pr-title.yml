@@ -11,6 +11,6 @@ permissions:
 
 jobs:
   pr-title:
-    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-pr-title.yml@v1
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-pr-title.yml@v2
     # with:
     #   types: "feat|fix|docs|chore|ci|refactor|test"   # narrow the allowed set

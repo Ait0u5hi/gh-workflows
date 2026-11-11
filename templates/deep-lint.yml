@@ -13,4 +13,4 @@ permissions:
 
 jobs:
   deep-lint:
-    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-deep-lint.yml@v1
+    uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-deep-lint.yml@v2
