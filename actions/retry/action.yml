@@ -62,11 +62,16 @@ runs:
           if bash -c "$_CMD" > "$_OUTFILE"; then
             cat "$_OUTFILE"
             echo "::endgroup::"
-            # Preserve newlines in the output via heredoc delimiter.
+            # Preserve newlines in the output via a heredoc delimiter. The
+            # delimiter is random: with a fixed one, command output containing
+            # that line could end the value early and inject further outputs.
+            _DELIM="RETRY_STDOUT_$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"
             {
-              echo 'stdout<<__RETRY_STDOUT_EOF__'
+              echo "stdout<<${_DELIM}"
               cat "$_OUTFILE"
-              echo '__RETRY_STDOUT_EOF__'
+              # The delimiter must start its own line.
+              if [ -s "$_OUTFILE" ] && [ -n "$(tail -c1 "$_OUTFILE")" ]; then echo; fi
+              echo "${_DELIM}"
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi

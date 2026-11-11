@@ -61,11 +61,20 @@ jobs:
           languages: ${{ matrix.language }}
           build-mode: ${{ inputs.build-mode }}
       - name: Perform CodeQL Analysis
-        # Tolerated (not the whole job): the analyze step also uploads SARIF,
-        # which needs GHAS — free on public repos but absent on a private
-        # personal repo that slipped past the visibility skip. Init failures
-        # (unsupported language, bad build-mode) still fail the job.
-        continue-on-error: true
+        # Fatal on failure: an extractor crash or a failed query-pack download
+        # must not leave the job green with no analysis behind it. Upload is
+        # split out below so only IT is tolerated.
         uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
+          category: "/language:${{ matrix.language }}"
+          upload: never
+          output: ${{ runner.temp }}/codeql-sarif
+      - name: Upload CodeQL results
+        # Tolerated: uploading SARIF needs GHAS — free on public repos but
+        # absent on a private personal repo that slipped past the visibility
+        # skip. Init and analysis failures above still fail the job.
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: ${{ runner.temp }}/codeql-sarif
           category: "/language:${{ matrix.language }}"

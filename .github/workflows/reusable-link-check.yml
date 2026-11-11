@@ -14,7 +14,7 @@ on:
       args:
         description: Arguments passed to lychee (paths/globs to check).
         type: string
-        default: "--no-progress './**/*.md'"
+        default: "--no-progress ./**/*.md"
 
 permissions:
   contents: read
@@ -36,17 +36,33 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.local/bin"
+          # Download/extract in a temp dir, not the checked-out PR tree (where
+          # a committed symlink under the tarball's name could redirect it).
+          dl=$(mktemp -d "$RUNNER_TEMP/lychee.XXXXXX")
           tarball="lychee-x86_64-unknown-linux-gnu.tar.gz"
           url="https://github.com/lycheeverse/lychee/releases/download/lychee-${LYCHEE_VERSION}/${tarball}"
-          curl -sSfL -o "$tarball" "$url"
-          echo "${LYCHEE_SHA256}  ${tarball}" | sha256sum -c -
+          curl -sSfL -o "$dl/$tarball" "$url"
           # The binary lives under a versioned dir in the tarball; strip it.
-          tar -xzf "$tarball" --strip-components=1 lychee-x86_64-unknown-linux-gnu/lychee
-          install -m 0755 lychee "$HOME/.local/bin/lychee"
+          (cd "$dl" && echo "${LYCHEE_SHA256}  ${tarball}" | sha256sum -c - \
+            && tar -xzf "$tarball" --strip-components=1 lychee-x86_64-unknown-linux-gnu/lychee)
+          install -m 0755 "$dl/lychee" "$HOME/.local/bin/lychee"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Run lychee
         env:
           LYCHEE_ARGS: ${{ inputs.args }}
         run: |
-          # shellcheck disable=SC2086  # LYCHEE_ARGS is intentionally word-split
-          lychee $LYCHEE_ARGS
+          set -euo pipefail
+          # Split on whitespace WITHOUT shell globbing (read -a never globs) and
+          # strip one level of surrounding quotes, so a glob reaches lychee
+          # intact and lychee expands it itself. The old unquoted $LYCHEE_ARGS
+          # passed the default's quotes through literally: lychee looked for a
+          # file named "'./**/*.md'", found none, checked 0 links and passed.
+          read -ra raw <<<"$LYCHEE_ARGS"
+          args=()
+          for a in "${raw[@]}"; do
+            case "$a" in
+              \'*\' | \"*\") a="${a:1:${#a}-2}" ;;
+            esac
+            args+=("$a")
+          done
+          lychee "${args[@]}"
