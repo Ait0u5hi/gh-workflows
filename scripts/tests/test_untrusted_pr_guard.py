@@ -19,7 +19,8 @@ from pathlib import Path
 import yaml
 
 WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
-GUARDED = ["python-ci", "python-eval", "node-ci", "go-ci", "content-scan", "crossplatform-lint"]
+GUARDED = ["python-ci", "python-eval", "node-ci", "go-ci", "content-scan",
+           "crossplatform-lint", "codeql"]  # codeql: autobuild/manual builds run PR code
 GUARD_NAME = "Refuse untrusted PR code on a self-hosted runner"
 OPT_OUT = "allow-untrusted-prs-on-self-hosted"
 
@@ -43,6 +44,7 @@ class GuardPresence(unittest.TestCase):
                     self.assertEqual(first.get("name"), GUARD_NAME, f"{name}:{job_id}")
                     self.assertIn("runner.environment == 'self-hosted'", first["if"])
                     self.assertIn(OPT_OUT, first["if"])
+                    self.assertEqual(first.get("shell"), "bash")
 
 
 class GuardDecision(unittest.TestCase):
@@ -56,11 +58,15 @@ class GuardDecision(unittest.TestCase):
             fh.write(self.script)
         try:
             return subprocess.run(
-                ["bash", "--noprofile", "--norc", "-e", fh.name],
+                ["bash", "--noprofile", "--norc", "-eo", "pipefail", fh.name],
                 env=dict(os.environ, EVENT_NAME=event, HEAD_REPO=head_repo, THIS_REPO=this_repo),
                 capture_output=True, text=True, timeout=30)
         finally:
             os.unlink(fh.name)
+
+    def test_script_is_bash_3_2_compatible(self):
+        # macOS self-hosted runners ship bash 3.2: no ${var,,} / ${var^^}.
+        self.assertNotRegex(self.script, r"\$\{[^}]*(,,|\^\^)\}")
 
     def test_refused(self):
         for event, head in [("pull_request", "attacker/lib"),

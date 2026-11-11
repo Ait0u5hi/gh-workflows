@@ -8,7 +8,8 @@
 # actionlint 1.7.12 (latest release) knows neither yet; upstream support is in
 # rhysd/actionlint#732 ($/ syntax) and #707 (job.workflow_*). Until a release
 # ships them, ignore EXACTLY those two errors in EXACTLY these files.
-# scripts/tests/test_actionlint_ignores.py keeps this list from growing.
+# scripts/tests/test_self_references.py (ActionlintIgnoresStayNarrow) keeps
+# this list from growing.
 paths:
   .github/workflows/reusable-content-scan.yml:
     ignore:

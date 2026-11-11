@@ -113,10 +113,6 @@ class RgArchGuard(unittest.TestCase):
         self.assertIn("exit 1", self.run_script)
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
-
 class RgPinsAgree(unittest.TestCase):
     """ci.yml's test ripgrep and the content-scan action's ripgrep must be the
     same release with the same x86_64 hash, or the tests exercise a binary the
@@ -134,3 +130,7 @@ class RgPinsAgree(unittest.TestCase):
                        if "RG_VERSION" in s.get("env", {}))
         self.assertEqual(ci_env["RG_VERSION"], act_env["RG_VERSION"])
         self.assertEqual(ci_env["RG_SHA256_AMD64"], act_env["RG_SHA256_AMD64"])
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

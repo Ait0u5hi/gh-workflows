@@ -82,6 +82,9 @@ jobs:
         # controls that actually stop it are repo/org settings (README ->
         # Security model). Runs before checkout, so no PR code has run yet.
         if: ${{ runner.environment == 'self-hosted' && !inputs.allow-untrusted-prs-on-self-hosted }}
+        # bash explicitly (a Windows runner defaults to pwsh); written for
+        # bash 3.2 too (macOS), so no ${var,,}.
+        shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || github.event.workflow_run.head_repository.full_name }}
@@ -91,7 +94,9 @@ jobs:
           case "$EVENT_NAME" in
             pull_request* | workflow_run)
               # A deleted head repo gives an empty HEAD_REPO: treated as foreign.
-              if [ "${HEAD_REPO,,}" != "${THIS_REPO,,}" ]; then
+              head=$(printf '%s' "$HEAD_REPO" | tr '[:upper:]' '[:lower:]')
+              this=$(printf '%s' "$THIS_REPO" | tr '[:upper:]' '[:lower:]')
+              if [ "$head" != "$this" ]; then
                 echo "::error::refusing PR code from ${HEAD_REPO:-a deleted repo} on a self-hosted runner"
                 echo "Use ephemeral runners and set allow-untrusted-prs-on-self-hosted to opt in."
                 exit 1

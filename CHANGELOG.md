@@ -22,7 +22,8 @@ relative to it; items marked **behavior change** can turn a caller's CI red.
 4. Defaults moved: Python 3.12 (eval/validation), python-ci matrix
    3.11–3.14, Node 22+24, golangci-lint v2.15.0 (the only accepted value).
 5. Content-scan with zero active patterns fails; a release tag must be
-   SemVer-shaped; release jobs need a Linux X64/ARM64 runner.
+   SemVer-shaped; release, golangci-lint and content-scan need a Linux
+   X64/ARM64 runner.
 6. A fork's PR on a self-hosted runner is refused unless you set
    `allow-untrusted-prs-on-self-hosted: true` (ephemeral runners only).
 7. Pinning a commit SHA instead of `@v2` now pins everything the workflow
@@ -40,7 +41,7 @@ relative to it; items marked **behavior change** can turn a caller's CI red.
   these features yet; `.github/actionlint.yaml` ignores exactly those errors
   in exactly those files (rhysd/actionlint#732, #707), kept narrow by a test.
 - **Self-hosted guard** (python-ci, python-eval, node-ci, go-ci,
-  content-scan, crossplatform-lint): fails a job, before checkout, when a
+  content-scan, crossplatform-lint, codeql): fails a job, before checkout, when a
   fork's PR (or a comment trigger) lands on a self-hosted runner. Opt out
   with `allow-untrusted-prs-on-self-hosted`. A misconfiguration guard, not a
   security boundary — see README → Security model.
