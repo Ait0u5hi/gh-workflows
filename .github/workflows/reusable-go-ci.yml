@@ -1,8 +1,8 @@
 # Reusable: generic Go CI — build + vet + test across a Go version matrix, with
 # opt-in golangci-lint. No third-party marketplace actions: only first-party
-# actions/setup-go, the built-in go toolchain, and a golangci-lint install
-# pinned by installer commit SHA + version (the install.sh verifies the binary
-# checksum). See the README "Design notes" for the dependency-minimization
+# actions/setup-go, the built-in go toolchain, and a golangci-lint release
+# binary downloaded at a pinned version and verified against a hard-coded
+# SHA-256. See the README "Design notes" for the dependency-minimization
 # rationale. Callers: see templates/go/ci.yml.
 name: Reusable Go CI
 
@@ -35,9 +35,11 @@ on:
         type: boolean
         default: false
       golangci-version:
-        description: golangci-lint version to install (must match the pinned installer below).
+        description: >-
+          golangci-lint version. Only the pinned, hash-verified release is
+          supported (currently v2.15.0); any other value fails the job.
         type: string
-        default: v2.13.0
+        default: v2.15.0
       test-command:
         description: Override the test command (default `go test [-race] ./...`).
         type: string
@@ -153,15 +155,43 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
-      - name: Install golangci-lint (installer pinned by commit SHA)
-        # install.sh fetched by immutable commit SHA (not a moving tag/branch); it
-        # verifies the downloaded binary's checksum. golangci-lint v2.13.0.
+      - name: Install golangci-lint (pinned release, SHA-256 verified)
+        # Downloaded directly and checked against hard-coded hashes (equal to
+        # the release's golangci-lint-2.15.0-checksums.txt). The old
+        # `curl install.sh | sh` ran without pipefail, so a failed download
+        # exited 0, and it trusted a checksums file from the same release.
+        shell: bash
         env:
-          GOLANGCI_INSTALLER_SHA: f838df1edb6265abbfa24f5cbb7381b21c735642
+          GOLANGCI_PINNED: v2.15.0
+          GOLANGCI_SHA256_AMD64: 9b7fe6a6bf6334b98decf8d86b11415ea7889afdabdd1959fdce23af2a9ebcea # linux-amd64
+          GOLANGCI_SHA256_ARM64: b4d8f17068b35ee6060cc2f69a16fb48740d706fbba81661c318649c114a6998 # linux-arm64
           GOLANGCI_VERSION: ${{ inputs.golangci-version }}
-        run: |
-          installer="https://raw.githubusercontent.com/golangci/golangci-lint/${GOLANGCI_INSTALLER_SHA}/install.sh"
-          curl -sSfL "$installer" | sh -s -- -b "$(go env GOPATH)/bin" "$GOLANGCI_VERSION"
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          RUNNER_OS_NAME: ${{ runner.os }}
+          RUNNER_ARCH: ${{ runner.arch }}
+        run: | # zizmor: ignore[github-env]
+          set -euo pipefail
+          if [ "$GOLANGCI_VERSION" != "$GOLANGCI_PINNED" ]; then
+            echo "::error::golangci-version '$GOLANGCI_VERSION' is not the pinned, hash-verified $GOLANGCI_PINNED; only that version is supported"
+            exit 1
+          fi
+          if [ "$RUNNER_OS_NAME" != "Linux" ]; then
+            echo "::error::golangci-lint install supports Linux runners only; got runner.os='$RUNNER_OS_NAME'"
+            exit 1
+          fi
+          case "$RUNNER_ARCH" in
+            X64) arch=amd64; sha="$GOLANGCI_SHA256_AMD64" ;;
+            ARM64) arch=arm64; sha="$GOLANGCI_SHA256_ARM64" ;;
+            *) echo "::error::no pinned golangci-lint build for runner.arch='$RUNNER_ARCH'"; exit 1 ;;
+          esac
+          ver="${GOLANGCI_PINNED#v}"
+          dir=$(mktemp -d "$RUNNER_TEMP/golangci.XXXXXX")
+          tarball="golangci-lint-${ver}-linux-${arch}.tar.gz"
+          curl -sSfL -o "$dir/$tarball" \
+            "https://github.com/golangci/golangci-lint/releases/download/${GOLANGCI_PINNED}/${tarball}"
+          (cd "$dir" && echo "${sha}  ${tarball}" | sha256sum -c - \
+            && tar -xzf "$tarball" --strip-components=1 "golangci-lint-${ver}-linux-${arch}/golangci-lint")
+          # A fixed RUNNER_TEMP path, not attacker-controlled.
+          echo "$dir" >> "$GITHUB_PATH"
+          "$dir/golangci-lint" version
       - name: Run golangci-lint
         run: golangci-lint run ./...
