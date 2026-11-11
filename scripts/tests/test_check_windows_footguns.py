@@ -307,5 +307,133 @@ class SeparatorHandlingTests(unittest.TestCase):
             self.assertIn("No staged files to scan", proc.stdout + proc.stderr)
 
 
+
+# Footgun spellings are assembled at runtime (never adjacent in this file's
+# own source) so SelfLintTests, which scans this file, stays clean.
+KILLPG = "os." + "killpg(1, 2)"
+DESKTOP = "~/" + "Desktop"
+
+
+class TokenizerMaskTests(unittest.TestCase):
+    """The scanner masks comments and docstrings with the tokenizer instead
+    of a line-based triple-quote counter, which one stray `\"\"\"` in a
+    comment or a string used to desynchronise for the rest of the file."""
+
+    def scan(self, source: str, name: str = "mod.py") -> subprocess.CompletedProcess:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / name).write_text(source, encoding="utf-8", newline="")
+            return run_script([name], root)
+
+    def assertFlaggedAt(self, proc, line: int):
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn(f"mod.py:{line}:", proc.stdout)
+
+    def test_triple_quote_inside_a_comment_does_not_hide_the_rest(self):
+        self.assertFlaggedAt(self.scan(f'import os\n# """\n{KILLPG}\n'), 3)
+
+    def test_triple_quote_inside_a_string_does_not_hide_the_rest(self):
+        self.assertFlaggedAt(self.scan(f"import os\nQ = '\"\"\"'\n{KILLPG}\n"), 3)
+
+    def test_code_after_a_closing_docstring_is_scanned(self):
+        src = f'import os\nx = """doc\nmore"""; {KILLPG}\n'
+        self.assertFlaggedAt(self.scan(src), 3)
+
+    def test_docstring_prose_is_not_a_finding(self):
+        proc = self.scan(f'def f():\n    """Never call {KILLPG} here."""\n')
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_api_name_inside_an_ordinary_string_is_not_a_finding(self):
+        proc = self.scan(f'msg = "{KILLPG} is unsupported on Windows"\n')
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    @unittest.skipUnless(sys.version_info >= (3, 12), "PEP 701 f-string tokens")
+    def test_code_inside_an_fstring_expression_is_scanned(self):
+        self.assertFlaggedAt(self.scan('import os\nx = f"""a {' + KILLPG + '} b"""\n'), 2)
+
+    def test_path_rules_still_match_inside_strings(self):
+        self.assertFlaggedAt(self.scan(f'p = "{DESKTOP}/x.txt"\n'), 1)
+
+    def test_guard_hint_inside_a_comment_does_not_excuse_the_line(self):
+        self.assertFlaggedAt(self.scan(f"import os\n{KILLPG}  # unsafe if IS_WINDOWS\n"), 2)
+
+    def test_marker_inside_a_string_does_not_suppress(self):
+        self.assertFlaggedAt(self.scan(f'import os\nx = "# windows-footgun: ok"; {KILLPG}\n'), 2)
+
+    def test_marker_covers_a_multi_line_statement(self):
+        src = f"import os\nx = (\n    {KILLPG}\n)  # windows-footgun: ok\n"
+        proc = self.scan(src)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("1 match(es) suppressed", proc.stderr)
+
+    def test_line_numbers_ignore_form_feeds_and_unicode_separators(self):
+        self.assertFlaggedAt(self.scan(f"import os\n\x0c\n{KILLPG}\n"), 3)
+        self.assertFlaggedAt(self.scan(f'import os\ns = "a b"\n{KILLPG}\n'), 3)
+
+    def test_bom_does_not_break_tokenizing(self):
+        proc = self.scan(f"﻿import os\n{KILLPG}\n")
+        self.assertFlaggedAt(proc, 2)
+        self.assertNotIn("does not tokenize", proc.stderr)
+
+    def test_open_with_encoding_on_a_continuation_line_is_not_flagged(self):
+        src = "with OPEN(path, 'w',\n          encoding='utf-8') as f:\n    pass\n".replace("OPEN(", "open(")
+        proc = self.scan(src)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_multi_line_open_without_encoding_is_still_flagged(self):
+        src = "with OPEN(path,\n          'w') as f:\n    pass\n".replace("OPEN(", "open(")
+        self.assertFlaggedAt(self.scan(src), 1)
+
+    def test_untokenizable_file_falls_back_and_still_reports(self):
+        proc = self.scan(f"import os\n{KILLPG}\nx = '''never closed\n")
+        self.assertFlaggedAt(proc, 2)
+        self.assertIn("does not tokenize", proc.stderr)
+
+
+class PathHandlingTests(unittest.TestCase):
+    def test_checkout_under_a_build_directory_is_still_scanned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "build" / "repo"
+            root.mkdir(parents=True)
+            (root / "mod.py").write_text(f"import os\n{KILLPG}\n", encoding="utf-8")
+            for args in (["mod.py"], ["."]):
+                with self.subTest(args=args):
+                    proc = run_script(args, root)
+                    self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+
+    def test_excluded_dir_inside_the_repo_is_still_excluded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "build").mkdir()
+            (root / "build" / "gen.py").write_text(f"import os\n{KILLPG}\n", encoding="utf-8")
+            (root / "ok.py").write_text("x = 1\n", encoding="utf-8")
+            proc = run_script(["."], root)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_symlink_is_judged_by_its_own_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "real.txt").write_text(f"import os\n{KILLPG}\n", encoding="utf-8")
+            (root / "mod.py").symlink_to("real.txt")
+            proc = run_script(["mod.py"], root)
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+
+    def test_unreadable_file_is_an_error_not_a_clean_scan(self):
+        import importlib.util
+        from unittest import mock
+
+        spec = importlib.util.spec_from_file_location("cwf_under_test", SCRIPT)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = mod  # dataclasses resolve their module here
+        self.addCleanup(sys.modules.pop, spec.name, None)
+        spec.loader.exec_module(mod)
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "mod.py"
+            target.write_text("x = 1\n", encoding="utf-8")
+            with mock.patch.object(Path, "read_text", side_effect=PermissionError(13, "Permission denied")):
+                rc = mod.main([str(target)])
+            self.assertEqual(rc, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
