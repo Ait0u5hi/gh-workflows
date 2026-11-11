@@ -65,11 +65,12 @@ class Tree:
             p.write_text(content)
 
     def run(self, patterns_file=".github/content-scan-patterns.txt", patterns_secret="",
-             paths=".", redact="auto", pcre2="false", rg_bin=None, path=PINNED_PATH):
+             paths=".", redact="auto", pcre2="false", rg_bin=None, path=PINNED_PATH, exclude=""):
         env = {
             "PATTERNS_FILE": patterns_file,
             "PATTERNS_SECRET": patterns_secret,
             "SCAN_PATHS": paths,
+            "EXCLUDE_GLOBS": exclude,
             "REDACT": redact,
             "PCRE2": pcre2,
             "PATH": path,
@@ -411,6 +412,38 @@ class TestAdversarialTree(unittest.TestCase):
             forged = lines.index(next(l for l in lines if l.startswith("::warning::forged")))
             self.assertLess(stop[0], forged)
             self.assertLess(forged, resume)
+
+class TestExclude(unittest.TestCase):
+    def test_excluded_file_is_not_scanned_others_are(self):
+        with Tree(**{
+            ".github/content-scan-patterns.txt": "alpha\n",
+            "tools/fake.py": "alpha (documentation value)\n",
+            "src/real.py": "alpha leaked\n",
+        }) as t:
+            r = t.run(exclude="tools/fake.py")
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn("src/real.py", r.stdout)
+            self.assertNotIn("tools/fake.py", r.stdout)
+            r = t.run(exclude="tools/fake.py\nsrc/**")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_exclude_value_cannot_become_an_rg_option(self):
+        with Tree(**{
+            ".github/content-scan-patterns.txt": "alpha\n",
+            "payload.sh": "touch PWNED\n",
+            "leaky.txt": "alpha\n",
+        }) as t:
+            r = t.run(exclude="--pre=bash")
+            self.assertFalse((t.dir / "PWNED").exists())
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+    def test_options_in_paths_are_paths_not_options(self):
+        # The pre-v2 workaround `paths: ". -g !x"` must fail loudly now,
+        # not silently scan with an injected option.
+        with Tree(**{".github/content-scan-patterns.txt": "alpha\n", "x": "alpha\n"}) as t:
+            r = t.run(paths=". -g !x")
+            self.assertNotEqual(r.returncode, 0)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

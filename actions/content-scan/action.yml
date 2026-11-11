@@ -28,6 +28,10 @@ inputs:
     description: Space-separated paths to scan.
     required: false
     default: "."
+  exclude:
+    description: Whitespace-separated ripgrep globs to exclude (each passed as --glob '!<glob>').
+    required: false
+    default: ""
   redact-matches:
     description: auto (on iff patterns-secret is set) | true | false.
     required: false
@@ -85,6 +89,7 @@ runs:
         PATTERNS_FILE: ${{ inputs.patterns-file }}
         PATTERNS_SECRET: ${{ inputs.patterns-secret }}
         SCAN_PATHS: ${{ inputs.paths }}
+        EXCLUDE_GLOBS: ${{ inputs.exclude }}
         REDACT: ${{ inputs.redact-matches }}
         PCRE2: ${{ inputs.pcre2 }}
         RG_BIN: ${{ steps.rg.outputs.rg-bin }}

@@ -47,7 +47,13 @@ on:
       paths:
         type: string
         default: .
-        description: Space-separated paths to scan. Defaults to the whole tree.
+        description: Space-separated paths to scan. Defaults to the whole tree. Paths only — options are not accepted here.
+      exclude:
+        type: string
+        default: ''
+        description: >-
+          Whitespace-separated ripgrep globs to leave out of the scan (each is
+          passed as `--glob '!<glob>'`), e.g. "tools/pseudonymize.py docs/**/*.svg".
       redact-matches:
         type: string
         default: auto
@@ -118,5 +124,6 @@ jobs:
           patterns-file: ${{ inputs.patterns-file }}
           patterns-secret: ${{ secrets.patterns }}
           paths: ${{ inputs.paths }}
+          exclude: ${{ inputs.exclude }}
           redact-matches: ${{ inputs.redact-matches }}
           pcre2: ${{ inputs.pcre2 }}

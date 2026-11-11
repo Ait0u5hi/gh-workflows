@@ -6,6 +6,13 @@ tags callers pin (`@v2`). See [README → Versioning](README.md#versioning).
 
 ## [Unreleased]
 
+### Added
+- `reusable-content-scan.yml` / `actions/content-scan`: `exclude` input —
+  whitespace-separated ripgrep globs to leave out of the scan, each passed as
+  one `--glob '!<glob>'` argument. Replaces the pre-v2 workaround of putting
+  `-g !<glob>` into `paths`, which v2 (correctly) treats as file names now
+  that paths always follow `--`.
+
 ### Changed
 - Docs: this repo's `main` and `v*` tags are now protected by rulesets
   (required CI + PR Governance checks, squash-only PRs, no force-push or
