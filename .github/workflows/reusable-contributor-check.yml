@@ -36,43 +36,70 @@ jobs:
       - name: Check for unmapped contributor emails
         env:
           BASE_REF: ${{ inputs.base-ref }}
+          # The PR head, not HEAD: on pull_request HEAD is GitHub's synthetic
+          # merge commit. Falls back to HEAD for non-PR events.
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || 'HEAD' }}
         run: |
-          MERGE_BASE=$(git merge-base "origin/${BASE_REF}" HEAD)
-          NEW_EMAILS=$(git log "${MERGE_BASE}..HEAD" --format='%ae' --no-merges | sort -u)
+          set -euo pipefail
+          MERGE_BASE=$(git merge-base "origin/${BASE_REF}" "${HEAD_SHA}")
+          # Merge commits included: a merge commit can carry arbitrary changes,
+          # so its author is checked like any other.
+          NEW_EMAILS=$(git log "${MERGE_BASE}..${HEAD_SHA}" --format='%ae' | sort -u)
           if [ -z "$NEW_EMAILS" ]; then
             echo "No new commits to check."; exit 0
           fi
 
-          MISSING=""
+          # Exact addresses only: a substring match let e.g.
+          # x@anthropic.com.evil.io or dependabot@evil.io through.
+          EXEMPT_EXACT=(
+            noreply@github.com            # commits made in the GitHub web UI
+            noreply@anthropic.com         # Claude
+            cursoragent@cursor.com        # Cursor agent
+          )
+          # GitHub id+login noreply addresses (incl. [bot] accounts such as
+          # 49699333+dependabot[bot]@...) resolve to a real account. Anchored.
+          NOREPLY_RE='^[0-9]+\+[A-Za-z0-9-]+(\[bot\])?@users\.noreply\.github\.com$'
+          # The email is used as a file name below: no path separators, no
+          # whitespace, no leading dot, exactly one @ (rejects ../../LICENSE).
+          VALID_RE='^[^/\\@[:space:].][^/\\@[:space:]]*@[^/\\@[:space:]]+$'
+
+          missing=()
           while IFS= read -r email; do
-            case "$email" in
-              *noreply@github.com*|*dependabot*|*github-actions*|*anthropic.com*|*cursor.com*)
-                continue ;;
-            esac
-            # GitHub id+login noreply emails auto-resolve to a real account.
-            if echo "$email" | grep -qP '\+.*@users\.noreply\.github\.com'; then
+            exempt=false
+            for e in "${EXEMPT_EXACT[@]}"; do
+              [ "$email" = "$e" ] && exempt=true
+            done
+            $exempt && continue
+            if [[ "$email" =~ $NOREPLY_RE ]]; then
               continue
             fi
-            if [ -f "contributors/emails/${email}" ]; then
+            if ! [[ "$email" =~ $VALID_RE ]]; then
+              missing+=("$email|(not a usable email address)")
               continue
             fi
-            AUTHOR=$(git log --author="$email" --format='%an' -1)
-            MISSING="${MISSING}\n  ${email} (${AUTHOR})"
+            if [ -f "contributors/emails/${email}" ] && [ ! -L "contributors/emails/${email}" ]; then
+              continue
+            fi
+            author=$(git log "${MERGE_BASE}..${HEAD_SHA}" --author="$email" --format='%an' -1 -F)
+            missing+=("$email|($author)")
           done <<< "$NEW_EMAILS"
 
-          if [ -n "$MISSING" ]; then
+          if [ "${#missing[@]}" -gt 0 ]; then
+            # printf '%s', never echo -e: names and emails are commit
+            # metadata the PR author controls, and an interpreted \n would
+            # let them start a log line with a workflow command.
             echo ""
-            echo "⚠️  New contributor email(s) without a mapping:"
-            echo -e "$MISSING"
+            echo "New contributor email(s) without a mapping:"
+            for m in "${missing[@]}"; do
+              printf '  %s %s\n' "${m%%|*}" "${m#*|}" | tr -d '\r'
+            done
             echo ""
             echo "Add a mapping file:"
-            echo -e "$MISSING" | while read -r line; do
-              email=$(echo "$line" | sed 's/^ *//' | cut -d' ' -f1)
-              [ -z "$email" ] && continue
-              echo "    python3 scripts/add_contributor.py ${email} <github-username>"
+            for m in "${missing[@]}"; do
+              printf '    python3 scripts/add_contributor.py %s <github-username>\n' "${m%%|*}"
             done
             echo ""
             echo "Find a login for an email:  gh api 'search/users?q=EMAIL+in:email' --jq '.items[0].login'"
             exit 1
           fi
-          echo "✅ All contributor emails are mapped."
+          echo "All contributor emails are mapped."
