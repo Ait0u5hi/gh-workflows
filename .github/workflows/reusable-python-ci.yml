@@ -159,16 +159,16 @@ jobs:
           if [ -d tests ] || compgen -G "test_*.py" >/dev/null || compgen -G "*_test.py" >/dev/null; then
             if [ -n "$TEST_COMMAND" ]; then
               # shellcheck disable=SC2086  # EXTRA_DEPS is intentionally word-split
-              pip install --quiet pytest==9.2.0 $EXTRA_DEPS
+              pip install --quiet "pytest>=8" $EXTRA_DEPS
               bash -c "$TEST_COMMAND"
             elif [ "$UPLOAD_COVERAGE" = "true" ]; then
               # shellcheck disable=SC2086
-              pip install --quiet pytest==9.2.0 pytest-cov==7.1.0 $EXTRA_DEPS
+              pip install --quiet "pytest>=8" "pytest-cov>=5" $EXTRA_DEPS
               python -m pytest -q --cov --cov-report=xml --cov-report=term-missing
               echo "coverage=true" >> "$GITHUB_OUTPUT"
             else
               # shellcheck disable=SC2086
-              pip install --quiet pytest==9.2.0 $EXTRA_DEPS
+              pip install --quiet "pytest>=8" $EXTRA_DEPS
               python -m pytest -q
             fi
           else

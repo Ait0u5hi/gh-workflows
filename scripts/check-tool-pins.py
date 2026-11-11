@@ -2,13 +2,15 @@
 """Report tool pins that have fallen behind their latest upstream release.
 
 Dependabot tracks the SHA-pinned `uses:` actions and the /requirements pip
-lock, but not the tools this repo downloads by version (ripgrep, lychee,
-git-cliff, golangci-lint, actionlint) or the `pip install pkg==X` pins inside
-the reusable workflows. This script finds those pins and compares each with
-the newest stable upstream release:
+lock (so those are NOT scanned here), but not the tools this repo downloads by
+version (ripgrep, lychee, git-cliff, golangci-lint, actionlint) or the
+`pip install pkg==X` pins inside the reusable workflows. This script finds
+those pins and compares each with the newest stable upstream release:
 
 - GitHub releases via `git ls-remote --tags` (no token, no API rate limit);
-- PyPI via its JSON API.
+- PyPI via its JSON API, counting only releases at least MIN_AGE_DAYS old —
+  the same cooldown Dependabot applies, so this job never pushes a
+  day-0 (possibly compromised, soon-yanked) release.
 
 It only reports. Bumping a pin is a reviewed change: download the release,
 verify its SHA-256 against upstream, update the hash next to the version.
@@ -26,10 +28,12 @@ import re
 import subprocess
 import sys
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-SCAN_GLOBS = (".github/workflows/*.yml", "actions/*/action.yml", "requirements/*.in")
+SCAN_GLOBS = (".github/workflows/*.yml", "actions/*/action.yml")
+MIN_AGE_DAYS = 7
 
 # env var name -> (GitHub repo, tag prefix). The pinned value may carry the
 # tag prefix itself (e.g. LYCHEE_VERSION: v0.24.2 for tag lychee-v0.24.2).
@@ -65,9 +69,27 @@ def latest_github(repo: str, prefix: str) -> str:
     return max(versions, key=vtuple)
 
 
+def pick_pypi(data: dict, now: datetime | None = None, min_age_days: int = MIN_AGE_DAYS) -> str:
+    """Newest stable, non-yanked release whose first upload is at least
+    min_age_days old, from a PyPI JSON document."""
+    now = now or datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=min_age_days)
+    best = None
+    for ver, files in data.get("releases", {}).items():
+        if not STABLE.match(ver) or not files or all(f.get("yanked") for f in files):
+            continue
+        uploaded = min(datetime.fromisoformat(f["upload_time_iso_8601"].replace("Z", "+00:00"))
+                       for f in files)
+        if uploaded <= cutoff and (best is None or vtuple(ver) > vtuple(best)):
+            best = ver
+    if best is None:
+        raise LookupError(f"no stable release older than {min_age_days} days")
+    return best
+
+
 def latest_pypi(pkg: str) -> str:
     with urllib.request.urlopen(f"https://pypi.org/pypi/{pkg}/json", timeout=60) as resp:
-        return json.load(resp)["info"]["version"]
+        return pick_pypi(json.load(resp))
 
 
 def find_pins(root: Path = REPO) -> list[tuple[str, str, str, str]]:

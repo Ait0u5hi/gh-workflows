@@ -20,7 +20,10 @@ relative to it; items marked **behavior change** can turn a caller's CI red.
    true`; zizmor 1.32 in meta-lint (new audits, e.g. `issue_comment`); the
    Windows-footgun checker now sees code a stray `"""` used to hide.
 4. Defaults moved: Python 3.12 (eval/validation), python-ci matrix
-   3.11–3.14, Node 22+24, golangci-lint v2.15.0 (the only accepted value).
+   3.11–3.14, Node 22+24, golangci-lint v2.15.0 (`golangci-version` now
+   defaults to "" = the pinned release; any other version is refused).
+   python-ci / python-eval install `pytest>=8` (`pytest-cov>=5`): a caller
+   pinning pytest 7 in `extra-deps` must move to 8+.
 5. Content-scan with zero active patterns fails; a release tag must be
    SemVer-shaped; release, golangci-lint and content-scan need a Linux
    X64/ARM64 runner.
@@ -116,9 +119,12 @@ relative to it; items marked **behavior change** can turn a caller's CI red.
   `scripts/rg-need-install.sh` is gone.
 - **Behavior change:** go-ci installs golangci-lint v2.15.0 as a
   hash-verified download (the old `curl | sh` installer exited 0 on a failed
-  download); other `golangci-version` values are refused.
-- **Behavior change:** meta-lint zizmor 1.26.1 → 1.32.0; pytest 9.2.0 /
-  pytest-cov 7.1.0 pinned in python-ci / python-eval.
+  download); `golangci-version` defaults to "" (the pinned release) and
+  other versions are refused.
+- **Behavior change:** meta-lint zizmor 1.26.1 → 1.32.0; python-ci /
+  python-eval install `pytest>=8` / `pytest-cov>=5` (were unpinned; a floor
+  rather than an exact pin, so callers on Python 3.9 or with their own
+  pytest pin still resolve).
 - This repo's CI installs its lint tools with `pip --require-hashes` from
   `requirements/ci.txt` (`uv pip compile --universal --generate-hashes`).
 - **Behavior change (defaults):** `reusable-python-eval` /

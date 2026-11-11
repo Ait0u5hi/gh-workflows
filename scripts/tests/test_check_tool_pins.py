@@ -44,6 +44,17 @@ class FindPins(unittest.TestCase):
             })
 
 
+class PickPypi(unittest.TestCase):
+    def test_skips_releases_younger_than_the_cooldown_and_yanked_ones(self):
+        from datetime import datetime, timezone
+        now = datetime(2026, 11, 11, tzinfo=timezone.utc)
+        f = lambda day, yanked=False: [{"upload_time_iso_8601": f"2026-11-{day:02d}T00:00:00.000000Z",
+                                        "yanked": yanked}]
+        data = {"releases": {"1.9.0": f(1), "1.10.0": f(2), "1.11.0": f(3, yanked=True),
+                             "2.0.0": f(10), "2.0.0rc1": f(1)}}
+        self.assertEqual(ctp.pick_pypi(data, now=now), "1.10.0")
+
+
 class Main(unittest.TestCase):
     def run_main(self, pins, gh=None, pypi=None):
         out = io.StringIO()

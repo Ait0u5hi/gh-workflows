@@ -36,10 +36,11 @@ on:
         default: false
       golangci-version:
         description: >-
-          golangci-lint version. Only the pinned, hash-verified release is
-          supported (currently v2.15.0); any other value fails the job.
+          golangci-lint version. Leave empty (the default) for the pinned,
+          hash-verified release (currently v2.15.0); setting that exact value
+          also works. Any other value fails the job.
         type: string
-        default: v2.15.0
+        default: ''
       test-command:
         description: Override the test command (default `go test [-race] ./...`).
         type: string
@@ -182,7 +183,7 @@ jobs:
           RUNNER_ARCH: ${{ runner.arch }}
         run: | # zizmor: ignore[github-env]
           set -euo pipefail
-          if [ "$GOLANGCI_VERSION" != "$GOLANGCI_PINNED" ]; then
+          if [ -n "$GOLANGCI_VERSION" ] && [ "$GOLANGCI_VERSION" != "$GOLANGCI_PINNED" ]; then
             echo "::error::golangci-version '$GOLANGCI_VERSION' is not the pinned $GOLANGCI_PINNED"
             echo "Only the pinned, hash-verified release is supported."
             exit 1

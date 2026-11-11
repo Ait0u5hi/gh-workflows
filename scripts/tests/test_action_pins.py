@@ -136,5 +136,22 @@ class ActionPins(unittest.TestCase):
                                  f"{name}:{n}: still pinned to retired {retired.get(sha)}")
 
 
+class GolangciPin(unittest.TestCase):
+    """The go-ci default must follow GOLANGCI_PINNED: "" means "the pinned
+    release", so bumping GOLANGCI_PINNED can never leave callers on a value
+    the install step refuses."""
+
+    def test_default_is_empty_and_the_step_accepts_it(self):
+        import yaml
+
+        wf = yaml.safe_load((WORKFLOWS / "reusable-go-ci.yml").read_text())
+        on = wf.get("on", wf.get(True))
+        self.assertEqual(on["workflow_call"]["inputs"]["golangci-version"]["default"], "")
+        step = next(s for s in wf["jobs"]["lint"]["steps"]
+                    if s.get("name", "").startswith("Install golangci-lint"))
+        self.assertIn('[ -n "$GOLANGCI_VERSION" ]', step["run"])
+        self.assertRegex(step["env"]["GOLANGCI_PINNED"], r"^v\d+\.\d+\.\d+$")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
