@@ -1,0 +1,6 @@
+# Tools this repo's own CI (.github/workflows/ci.yml) installs with pip.
+# Regenerate the hashed lock with:
+#   uv pip compile --universal --generate-hashes requirements/ci.in -o requirements/ci.txt
+yamllint==1.38.0
+zizmor==1.32.0
+pyyaml==6.0.3

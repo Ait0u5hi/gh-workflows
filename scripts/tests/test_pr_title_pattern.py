@@ -116,6 +116,20 @@ class PrTitlePattern(unittest.TestCase):
                           "the extracted pattern accepts anything — extraction is broken")
 
 
+class TestEveryDependabotEntryTitle(unittest.TestCase):
+    """Each update entry (github-actions AND the /requirements pip entry)
+    must produce a title the gate accepts."""
+
+    def test_each_update_entry_passes_the_gate(self):
+        cfg = yaml.safe_load(DEPENDABOT.read_text(encoding="utf-8"))
+        pattern = re.compile(gate_pattern())
+        for u in cfg["updates"]:
+            cm = u.get("commit-message") or {}
+            prefix = cm.get("prefix", "") + ("(deps)" if cm.get("include") == "scope" else "")
+            with self.subTest(ecosystem=u["package-ecosystem"]):
+                self.assertRegex(f"{prefix}: {SUBJECT}", pattern)
+
+
 class TestGovernanceTriggers(unittest.TestCase):
     """This repo's own pr-governance must re-run on the same events as the
     template it ships. It once lacked `edited`, so a PR whose title was

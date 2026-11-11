@@ -68,7 +68,7 @@ jobs:
         run: |
           if [ -d tests ] || compgen -G "test_*.py" >/dev/null || compgen -G "*_test.py" >/dev/null; then
             # shellcheck disable=SC2086  # EXTRA_DEPS is intentionally word-split
-            pip install --quiet pytest $EXTRA_DEPS
+            pip install --quiet pytest==9.2.0 $EXTRA_DEPS
             python -m pytest -q
           else
             echo "no tests yet — nothing to run"

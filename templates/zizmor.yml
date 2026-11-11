@@ -7,3 +7,9 @@ rules:
       policies:
         "Ait0u5hi/*": ref-pin
         "*": hash-pin
+  # zizmor >= 1.30 flags `uses: ./...` and suggests GitHub's `$/...`
+  # self-repository syntax, but actionlint (1.7.12, the latest release)
+  # still rejects `$/...`. Re-enable once actionlint accepts it
+  # (rhysd/actionlint#732).
+  self-repository:
+    disable: true

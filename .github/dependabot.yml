@@ -6,10 +6,12 @@
 # actions publish patches (often themselves security fixes). Dependabot opens
 # a PR with the new SHA + release notes; we review and merge like any other PR.
 #
-# We do NOT enable any source-dependency ecosystem (pip/npm/etc.) here — this
-# repo has none. Consumer repos copy templates/dependabot.yml, which is the
-# same actions-only policy: source-dependency pins (uv.lock, package-lock.json)
-# stay under manual, reviewed control and are not bumped on a schedule.
+# The one source-dependency ecosystem enabled is pip for /requirements: the
+# hash-locked tools this repo's own CI installs (yamllint, zizmor, pyyaml).
+# A bump there is a lint-tool upgrade, reviewed like an action bump.
+# Consumer repos copy templates/dependabot.yml, which stays actions-only:
+# their source-dependency pins (uv.lock, package-lock.json) remain under
+# manual, reviewed control and are not bumped on a schedule.
 #
 # CVE-only security-update PRs for source deps are handled separately via each
 # repo's "Dependabot security updates" setting (Settings -> Code security),
@@ -19,6 +21,11 @@
 version: 2
 updates:
   - package-ecosystem: "github-actions"
+    # Wait a week before proposing a freshly published version, so a
+    # compromised release has time to be caught and yanked. Security
+    # updates are not delayed by this.
+    cooldown:
+      default-days: 7
     directory: "/"
     schedule:
       interval: "weekly"
@@ -43,3 +50,23 @@ updates:
         update-types:
           - "minor"
           - "patch"
+
+  - package-ecosystem: "pip"
+    # Wait a week before proposing a freshly published version, so a
+    # compromised release has time to be caught and yanked. Security
+    # updates are not delayed by this.
+    cooldown:
+      default-days: 7
+    directory: "/requirements"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+    commit-message:
+      # One parenthesised scope only (see the github-actions entry above).
+      prefix: "chore(ci-deps)"
+    groups:
+      ci-tools:
+        patterns: ["*"]

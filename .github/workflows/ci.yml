@@ -36,13 +36,14 @@ jobs:
           installer="https://raw.githubusercontent.com/rhysd/actionlint/${ACTIONLINT_INSTALLER_SHA}/scripts/download-actionlint.bash"
           bash <(curl -sSfL "$installer") "$ACTIONLINT_VERSION"
           ./actionlint -color
+      # yamllint + zizmor (and pyyaml) come from a hash-locked requirements
+      # file: pip refuses any file whose hash isn't in the lock.
+      - name: Install lint tools (hash-locked)
+        run: pip install --quiet --require-hashes --only-binary :all: -r requirements/ci.txt
       - name: yamllint
-        run: |
-          pip install --quiet yamllint==1.38.0
-          yamllint .
+        run: yamllint .
       - name: zizmor (workflow security audit)
         run: |
-          pip install --quiet zizmor==1.32.0
           # actions/ too: the composite actions run inside every caller's job.
           zizmor --no-online-audits .github/workflows/ actions/
 
@@ -90,7 +91,7 @@ jobs:
       # test_sync_labels and test_pr_title_pattern read YAML; setup-python's
       # interpreter has no PyYAML.
       - name: Install PyYAML (pinned)
-        run: pip install --quiet pyyaml==6.0.3
+        run: pip install --quiet --require-hashes --only-binary :all: -r requirements/ci.txt
       # Every test must run: a skip here means a prerequisite went missing.
       - name: unittest (scripts/tests)
         env:
