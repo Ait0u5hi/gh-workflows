@@ -1,6 +1,6 @@
-# Composite action backing reusable-content-scan.yml. Installs ripgrep if the
-# runner doesn't already have it (self-hosted runners may not), then runs the
-# scan logic in scripts/content-scan.sh. Using a composite action (rather than
+# Composite action backing reusable-content-scan.yml. Installs a pinned,
+# SHA-256-verified ripgrep, then runs the scan logic in
+# scripts/content-scan.sh. Using a composite action (rather than
 # a second `actions/checkout` of this repo) lets the reusable workflow reach
 # scripts/content-scan.sh with the same same-owner grant that already resolved
 # it — no extra token, no repo-visibility change. The full gh-workflows repo is
@@ -44,60 +44,36 @@ branding:
 runs:
   using: composite
   steps:
-    - name: Install ripgrep (pinned + SHA-256 verified) if missing or PCRE2 is unavailable but requested
+    - name: Install pinned ripgrep (SHA-256 verified)
       id: rg
       shell: bash
       env:
-        # ripgrep 14.1.1. Only these two targets are published upstream:
-        # musl for x86_64, gnu for aarch64 (no aarch64-musl release exists).
-        # Both are built with PCRE2 support, unlike some distro packages.
-        RG_VERSION: "14.1.1"
-        RG_SHA256_AMD64: 4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e # x86_64-unknown-linux-musl
-        RG_SHA256_ARM64: c827481c4ff4ea10c9dc7a4022c8de5db34a5737cb74484d62eb94a95841ab2f # aarch64-unknown-linux-gnu
-        PCRE2: ${{ inputs.pcre2 }}
-      # The PATH entry appended below is a fixed literal, not attacker-controlled
-      # input, so this doesn't carry the injection risk the rule guards against —
-      # same pattern reusable-link-check.yml already uses for lychee. Whether we
-      # install at all is decided by scripts/rg-need-install.sh (unit-tested
-      # separately) rather than inline here.
-      run: | # zizmor: ignore[github-env]
+        # ripgrep 15.2.0 (hashes match upstream's .sha256 assets). Built with
+        # PCRE2 statically linked. Always installed, never taken from PATH: an
+        # `rg` already on a (persistent, self-hosted) runner could be one a
+        # previous job planted, and it would be handed the secret patterns.
+        RG_VERSION: "15.2.0"
+        RG_SHA256_AMD64: 33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c # x86_64-unknown-linux-musl
+        RG_SHA256_ARM64: a740b91c82eaf9914cfedd353572f2791cbe0162c84101ee0951058f4dcbc90d # aarch64-unknown-linux-gnu
+      run: |
         set -euo pipefail
-        if "${GITHUB_ACTION_PATH}/../../scripts/rg-need-install.sh"; then
-          case "$(uname -m)" in
-            x86_64) target=x86_64-unknown-linux-musl; sha="$RG_SHA256_AMD64" ;;
-            aarch64|arm64) target=aarch64-unknown-linux-gnu; sha="$RG_SHA256_ARM64" ;;
-            *) echo "::error::no pinned ripgrep release for architecture $(uname -m)"; exit 1 ;;
-          esac
-          mkdir -p "$HOME/.local/bin"
-          # Download and extract in a fresh temp dir, never in the checked-out
-          # PR tree: a PR could commit a symlink under the tarball's name and
-          # have curl write through it.
-          dl=$(mktemp -d "${RUNNER_TEMP:-/tmp}/rg.XXXXXX")
-          tarball="ripgrep-${RG_VERSION}-${target}.tar.gz"
-          url="https://github.com/BurntSushi/ripgrep/releases/download/${RG_VERSION}/${tarball}"
-          curl -sSfL -o "$dl/$tarball" "$url"
-          (cd "$dl" && echo "${sha}  ${tarball}" | sha256sum -c - \
-            && tar -xzf "$tarball" --strip-components=1 "ripgrep-${RG_VERSION}-${target}/rg")
-          install -m 0755 "$dl/rg" "$HOME/.local/bin/rg"
-          rm -rf "$dl"
-          # $GITHUB_PATH entries are prepended to PATH for later steps, so
-          # this takes precedence over the system rg — but the scan step
-          # below is also handed the exact path via RG_BIN, rather than
-          # relying on PATH ordering alone.
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          rg_bin="$HOME/.local/bin/rg"
-        else
-          rg_bin="$(command -v rg)"
-        fi
-
-        echo "rg-bin=$rg_bin" >>"$GITHUB_OUTPUT"
-
-        echo "Using rg: $rg_bin ($("$rg_bin" --version | head -1))"
-        if "$rg_bin" --pcre2-version >/dev/null 2>&1; then
-          echo "PCRE2: $("$rg_bin" --pcre2-version)"
-        else
-          echo "PCRE2: not available in this build"
-        fi
+        case "$(uname -m)" in
+          x86_64) target=x86_64-unknown-linux-musl; sha="$RG_SHA256_AMD64" ;;
+          aarch64|arm64) target=aarch64-unknown-linux-gnu; sha="$RG_SHA256_ARM64" ;;
+          *) echo "::error::no pinned ripgrep release for architecture $(uname -m)"; exit 1 ;;
+        esac
+        # A fresh temp dir, never the checked-out PR tree (where a committed
+        # symlink under the tarball's name could redirect the write).
+        dir=$(mktemp -d "${RUNNER_TEMP:-/tmp}/rg.XXXXXX")
+        tarball="ripgrep-${RG_VERSION}-${target}.tar.gz"
+        curl -sSfL -o "$dir/$tarball" \
+          "https://github.com/BurntSushi/ripgrep/releases/download/${RG_VERSION}/${tarball}"
+        (cd "$dir" && echo "${sha}  ${tarball}" | sha256sum -c - \
+          && tar -xzf "$tarball" --strip-components=1 "ripgrep-${RG_VERSION}-${target}/rg")
+        rm -f "$dir/$tarball"
+        echo "rg-bin=$dir/rg" >>"$GITHUB_OUTPUT"
+        "$dir/rg" --version | head -1
+        "$dir/rg" --pcre2-version | head -1
 
     - name: Scan tree for forbidden content
       shell: bash

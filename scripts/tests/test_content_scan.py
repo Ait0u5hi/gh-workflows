@@ -136,6 +136,17 @@ class TestSecretOnly(unittest.TestCase):
                       patterns_secret="# a comment\n\nalpha\n")
             self.assertEqual(r.returncode, 1)
 
+    def test_crlf_file_redacts_to_a_clean_path_and_line(self):
+        # ripgrep 15 preserves line terminators with -r; the redacted output
+        # must still be exactly `path:line`, with no stray carriage return.
+        with Tree() as t:
+            (t.dir / "leaky.txt").write_bytes(b"first\r\nthe alpha secret\r\n")
+            r = t.run(patterns_file=".github/does-not-exist.txt", patterns_secret="alpha\n")
+            self.assertEqual(r.returncode, 1)
+            self.assertNotIn("alpha", r.stdout)
+            self.assertNotIn("\r", r.stdout)
+            self.assertRegex(r.stdout, r"(?m)^\./leaky\.txt:2$")
+
     def test_single_file_target_still_redacts(self):
         # ripgrep omits the filename when the scan target is a single file
         # (unlike a directory target), so a caller passing e.g. `paths:

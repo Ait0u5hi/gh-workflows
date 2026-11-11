@@ -65,8 +65,8 @@ jobs:
       # RG_VERSION and the hash in step with actions/content-scan/action.yml).
       - name: Install ripgrep (pinned + SHA-256 verified)
         env:
-          RG_VERSION: "14.1.1"
-          RG_SHA256_AMD64: 4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e # x86_64-unknown-linux-musl
+          RG_VERSION: "15.2.0"
+          RG_SHA256_AMD64: 33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c # x86_64-unknown-linux-musl
           RUNNER_ARCH: ${{ runner.arch }}
         run: |
           set -euo pipefail
