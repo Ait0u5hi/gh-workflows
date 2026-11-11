@@ -42,8 +42,9 @@ jobs:
           yamllint .
       - name: zizmor (workflow security audit)
         run: |
-          pip install --quiet zizmor==1.26.1
-          zizmor --no-online-audits .github/workflows/
+          pip install --quiet zizmor==1.32.0
+          # actions/ too: the composite actions run inside every caller's job.
+          zizmor --no-online-audits .github/workflows/ actions/
 
   unit-tests:
     name: unit-tests (scripts/tests)

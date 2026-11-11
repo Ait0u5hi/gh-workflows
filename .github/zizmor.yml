@@ -1,0 +1,11 @@
+# zizmor config for this repo's own self-CI (ci.yml meta-lint).
+#
+# NOTE: this is NOT the file consumers copy — that is templates/zizmor.yml.
+rules:
+  # zizmor >=1.32 suggests `$/...` (GitHub's self-repository syntax) instead of
+  # `./...` for local reusable-workflow calls. actionlint 1.7.12 (the latest
+  # release, pinned in ci.yml) rejects `$/...` as an invalid `uses:`, and
+  # pr-governance.yml relies on `./...` to dogfood THIS PR's reusables. Revisit
+  # once actionlint accepts the new syntax.
+  self-repository:
+    disable: true

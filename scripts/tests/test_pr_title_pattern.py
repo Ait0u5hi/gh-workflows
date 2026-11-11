@@ -116,5 +116,25 @@ class PrTitlePattern(unittest.TestCase):
                           "the extracted pattern accepts anything — extraction is broken")
 
 
+class TestGovernanceTriggers(unittest.TestCase):
+    """This repo's own pr-governance must re-run on the same events as the
+    template it ships. It once lacked `edited`, so a PR whose title was
+    fixed after pr-title failed (or edited after it passed) was never
+    re-checked here even though consumers were told the trigger is required."""
+
+    @staticmethod
+    def pull_request_trigger(path):
+        wf = yaml.safe_load(path.read_text())
+        on = wf.get("on", wf.get(True))  # PyYAML parses a bare `on` key as True
+        return on["pull_request"]
+
+    def test_dogfood_triggers_match_the_template(self):
+        dogfood = self.pull_request_trigger(REPO / ".github/workflows/pr-governance.yml")
+        template = self.pull_request_trigger(REPO / "templates/pr-governance.yml")
+        self.assertIn("edited", template["types"])
+        self.assertEqual(sorted(dogfood["types"]), sorted(template["types"]))
+        self.assertEqual(dogfood.get("branches"), template.get("branches"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
