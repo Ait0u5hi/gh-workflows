@@ -15,6 +15,12 @@
 #   PATTERNS_SECRET newline-separated regexes, e.g. from a GitHub secret (optional)
 #   SCAN_PATHS      space-separated paths to scan (word-split and glob-expanded
 #                   intentionally; always passed to rg after `--`)
+#   EXCLUDE_GLOBS   whitespace-separated rg globs to leave out of the scan; each
+#                   becomes ONE `--glob '!<glob>'` argument (never word-split
+#                   further, never shell-globbed), so it can't inject options.
+#                   Write them without a leading `!` (refused) and relative to
+#                   the repo root; a leading `./` is stripped. rg does not apply
+#                   globs to a path named explicitly in SCAN_PATHS.
 #   REDACT          auto|true|false (default: auto — redact iff PATTERNS_SECRET is non-empty)
 #   PCRE2           true|false (default: false) — adds -P for lookaround patterns
 #   RG_BIN          ripgrep binary/path to use (default: rg, resolved from PATH)
@@ -36,6 +42,7 @@ set -uo pipefail
 PATTERNS_FILE="${PATTERNS_FILE:-}"
 PATTERNS_SECRET="${PATTERNS_SECRET:-}"
 SCAN_PATHS="${SCAN_PATHS:-.}"
+EXCLUDE_GLOBS="${EXCLUDE_GLOBS:-}"
 REDACT="${REDACT:-auto}"
 PCRE2="${PCRE2:-false}"
 RG_BIN="${RG_BIN:-rg}"
@@ -131,6 +138,21 @@ rg_args=(-n -S --hidden --no-ignore -a --glob '!.git')
 if $have_file; then
   rg_args+=(--glob "!$PATTERNS_FILE")
 fi
+# read -a never globs; each glob is attached to its own --glob argument.
+# The ${a[@]+...} form keeps an empty list safe under `set -u` on bash 3.2.
+exclude_globs=()
+read -r -d '' -a exclude_globs <<<"$EXCLUDE_GLOBS" || true
+for g in ${exclude_globs[@]+"${exclude_globs[@]}"}; do
+  # rg reads `!!x` as a literal `!`, so the old `-g !x` habit would exclude
+  # nothing, silently. Refuse it rather than scan with a no-op exclusion.
+  case "$g" in
+    '!'*)
+      echo "::error::exclude globs are already negated; drop the leading '!' from '$g'"
+      exit 1
+      ;;
+  esac
+  rg_args+=(--glob "!${g#./}") # rg globs never match a leading ./
+done
 if [ "$PCRE2" = "true" ]; then
   rg_args+=(-P)
 fi
