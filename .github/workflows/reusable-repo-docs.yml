@@ -13,9 +13,11 @@ on:
           gh-workflows ref to fetch the checker script from. Defaults to v1. Pass 'main' while
           bootstrapping a checker that has not been released to v1 yet, or a SHA when gh-workflows
           checks ITSELF - otherwise it would validate the released script rather than the one in
-          the PR, and a PR that broke the checker would still pass.
+          the PR, and a PR that broke the checker would still pass. Fully qualified by default
+          (refs/tags/v1): a bare "v1" is resolved as a branch before a tag, so anyone able to
+          push a branch named v1 could otherwise swap the checker every caller runs.
         type: string
-        default: v1
+        default: refs/tags/v1
       skip:
         description: Comma-separated required files to waive (e.g. "SECURITY.md") while a repo adopts incrementally.
         type: string
