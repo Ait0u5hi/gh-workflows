@@ -1,7 +1,7 @@
 # Copy to .github/workflows/stale.yml — OPTIONAL. Labels stale PRs/issues but
-# NEVER closes them (days-before-close: -1): the fleet ledger tracks open PRs
-# (gc.remote_prs gates branch deletion on them) and a bot-closed PR would
-# desync that bookkeeping.
+# NEVER closes them (days-before-close: -1): if anything outside GitHub tracks
+# open PRs (branch clean-up, a review queue), a bot-closed PR silently drops
+# out of it.
 name: Mark stale issues and pull requests
 
 on:
@@ -19,7 +19,7 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      - uses: actions/stale@5bef64f19d7facfb25b37b414482c7164d639639 # v9
+      - uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 # v11.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           days-before-stale: 14

@@ -88,6 +88,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Drop any PR-committed report files
+        # upload-artifact follows symlinks: a PR committing results.sarif as a
+        # symlink (e.g. to a runner credential) would otherwise get the target
+        # published as an artifact if the scanner didn't overwrite it.
+        run: rm -f results.json results.sarif
+
       - name: Run scanner
         uses: google/osv-scanner-action/osv-scanner-action@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
         with:
@@ -157,6 +163,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Drop any PR-committed report files
+        # upload-artifact follows symlinks: a PR committing results.sarif as a
+        # symlink (e.g. to a runner credential) would otherwise get the target
+        # published as an artifact if the scanner didn't overwrite it.
+        run: rm -f results.json results.sarif
 
       - name: Run scanner (local binary)
         env:

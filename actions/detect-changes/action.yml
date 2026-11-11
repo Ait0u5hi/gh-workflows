@@ -59,20 +59,38 @@ runs:
         # merge-base with the base ref. On any other event (push, dispatch,
         # schedule) or if the merge-base is unavailable (shallow clone with no
         # base ref fetched), leave it empty so the classifier fails open.
-        CHANGED=""
+        #
+        # NUL-delimited and unquoted (core.quotePath=false): git's default
+        # quoting turns e.g. a non-ASCII name into "src/\303\251.py", which
+        # matches no glob — every lane would read false and the gated jobs
+        # would be skipped (a skipped job satisfies a required check).
+        CHANGED_FILE=$(mktemp)
+        trap 'rm -f "$CHANGED_FILE"' EXIT
         if [ "$EVENT_NAME" = "pull_request" ]; then
           BASE=$(git merge-base "origin/${BASE_REF}" HEAD 2>/dev/null || true)
           if [ -n "$BASE" ]; then
-            CHANGED=$(git diff --name-only "${BASE}..HEAD" || true)
+            if ! git -c core.quotePath=false diff -z --name-only "${BASE}..HEAD" >"$CHANGED_FILE"; then
+              echo "::warning::git diff failed — failing open"
+              : >"$CHANGED_FILE"
+            fi
           else
             echo "::warning::no merge-base with origin/${BASE_REF} (shallow checkout?) — failing open"
           fi
         fi
+        # File names come from the PR: suspend workflow commands while
+        # echoing them.
+        STOP_TOKEN=$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')
         echo "Changed files:"
-        printf '%s\n' "${CHANGED:-(none / fail-open)}"
+        echo "::stop-commands::${STOP_TOKEN}"
+        if [ -s "$CHANGED_FILE" ]; then
+          tr '\0' '\n' <"$CHANGED_FILE"
+        else
+          echo "(none / fail-open)"
+        fi
+        echo "::${STOP_TOKEN}::"
         # Python does the glob matching (fnmatch) and JSON emission; it is
         # always present on GitHub-hosted runners and avoids brittle bash globbing.
-        CHANGED="$CHANGED" python3 - <<'PY' >> "$GITHUB_OUTPUT"
+        CHANGED_FILE="$CHANGED_FILE" python3 - <<'PY' >> "$GITHUB_OUTPUT"
         import fnmatch, json, os
 
         def matches(path, pattern):
@@ -86,7 +104,9 @@ runs:
                 return True
             return False
 
-        changed = [f for f in os.environ.get("CHANGED", "").splitlines() if f.strip()]
+        with open(os.environ["CHANGED_FILE"], "rb") as fh:
+            raw_names = fh.read().split(b"\0")
+        changed = [n.decode("utf-8", "surrogateescape") for n in raw_names if n]
         fail_open = not changed  # empty list => non-PR event or undiffable => all lanes on
         result = {}
         for raw in os.environ.get("FILTERS", "").splitlines():

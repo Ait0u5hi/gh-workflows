@@ -23,6 +23,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: pr-governance-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   contributor-check:
     uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-contributor-check.yml@v1

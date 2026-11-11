@@ -17,10 +17,10 @@ on:
         default: ""
       node-versions:
         description: >-
-          JSON array of Node versions for the build matrix, e.g. '["20","22"]'.
+          JSON array of Node versions for the build matrix, e.g. '["22","24"]'.
           Used only when node-version is empty.
         type: string
-        default: '["20","22"]'
+        default: '["22","24"]'
       run-build:
         type: boolean
         default: true

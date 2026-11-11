@@ -34,9 +34,8 @@ gh search prs    --repo Ait0u5hi/<repo> --state closed "<your terms>"
 **The tracker lags the code.** Plenty of requested features already exist in-tree, so search the
 source too, not just issues.
 
-> Search the source with the **codesearch MCP**, not with bare `grep`. The ambient `grep` in these
-> agent harnesses silently skips gitignored files and exits 0, so an incomplete answer looks like a
-> clean one. If you must use ripgrep directly, pass `rg -uu`.
+> Search with `rg -uu` (or `grep -r`), not bare `rg`: ripgrep skips gitignored and hidden files by
+> default and still exits cleanly, so an incomplete answer looks like a clean one.
 
 ## 3. Ground rules
 
@@ -79,8 +78,8 @@ When a decision replaces an earlier one, retire the old one in the same PR: mark
 have the new one name what it supersedes. A decision record that quietly stops being true is worse
 than none.
 
-> **Format is under review.** These repos currently use four different ADR header shapes. A research
-> pass is choosing a canonical format before any automated check lands. Until then: follow the shape
+> **Format is under review** (as of 2026-11). These repos currently use four different ADR header
+> shapes, and no automated check enforces one. Until a canonical format is chosen: follow the shape
 > already used in the repo you are working in.
 
 ## 6. Security
@@ -107,7 +106,7 @@ paste-able script, the actual command output. "I tested it" is not evidence; a c
 can run and see the same result is.
 
 **What must be green:** the `pr-governance` checks (attribution, cross-platform lint, required repo
-docs, PR title).
+docs, PR title, documented commands).
 
 ## 8. The verification bar
 
@@ -142,13 +141,16 @@ Instead:
 
 Being straight about this, because pretending otherwise is the failure mode §8 warns about.
 
-- **`gh-workflows` is public**, so its checks are wired to branch protection and genuinely block a
-  merge, admins included.
-- **The other repos in this fleet are private on a free plan**, where GitHub branch protection and
-  rulesets are unavailable (`403 Upgrade to GitHub Pro or make this repository public`). Their
-  checks run and report, but **nothing stops a merge past a red check**. Treat them as advisory.
-- For those repos, the gate that actually refuses is the **fleet publish path**, which requires a
-  reviewer attestation from a different identity than the builder before a change can be published.
+- **`gh-workflows` is public**, so rulesets with required status checks are available to it — but
+  a check only blocks a merge once a ruleset actually requires it. As of 2026-11 none does: its
+  checks run and report, and are advisory until that setting is turned on.
+- **Private repos on a free plan** can't use branch protection or rulesets at all
+  (`403 Upgrade to GitHub Pro or make this repository public`). Their checks run and report, but
+  **nothing stops a merge past a red check**. Treat them as advisory.
+- Wherever checks are advisory, the real gate is human review — ideally by someone other than the
+  author — before the change is merged or released.
+- On `pull_request`, GitHub runs the workflow files from the PR itself, so a PR can edit the check
+  that judges it. Only a required check, plus review of `.github/workflows/` changes, closes that.
 
 If you are contributing to a private repo here, the checks are a courtesy to you, not a wall. Read
 them.

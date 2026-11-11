@@ -120,5 +120,34 @@ class TestOptions(unittest.TestCase):
             self.assertTrue(r.check(require_link=False))
 
 
+class TestNotARegularFile(unittest.TestCase):
+    """A PR controls the tree: a directory or a symlink must not satisfy
+    presence (and a directory CONTRIBUTING.md used to skip the link check)."""
+
+    def test_directory_named_like_a_required_doc_fails(self):
+        with Repo(**{"CONTRIBUTING.md": None, "CONTRIBUTING.md/.keep": "x"}) as r:
+            self.assertTrue(any("not a regular file" in f for f in r.check()))
+
+    def test_symlink_to_dev_null_fails(self):
+        with Repo(**{"SECURITY.md": None}) as r:
+            (r.dir / "SECURITY.md").symlink_to("/dev/null")
+            self.assertTrue(any("symlink" in f for f in r.check()))
+
+    def test_symlink_outside_the_repo_fails(self):
+        outside = Path(tempfile.mkdtemp())
+        try:
+            (outside / "LICENSE").write_text("MIT")
+            with Repo(**{"LICENSE": None}) as r:
+                (r.dir / "LICENSE").symlink_to(outside / "LICENSE")
+                self.assertTrue(any("symlink" in f for f in r.check()))
+        finally:
+            shutil.rmtree(outside, ignore_errors=True)
+
+    def test_symlink_to_a_doc_inside_the_repo_passes(self):
+        with Repo(**{"LICENSE": None, "LICENSE.md": "MIT"}) as r:
+            (r.dir / "LICENSE").symlink_to("LICENSE.md")
+            self.assertEqual(r.check(), [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

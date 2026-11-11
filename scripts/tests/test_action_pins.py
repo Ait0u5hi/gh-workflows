@@ -23,6 +23,8 @@ import unittest
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 WORKFLOWS = REPO / ".github" / "workflows"
+TEMPLATES = REPO / "templates"
+ACTIONS = REPO / "actions"
 
 # action -> {version comment: full commit SHA}, each verified against the
 # upstream tag at the time it was added. Add a row only after resolving the
@@ -36,15 +38,26 @@ EXPECTED = {
 USES = re.compile(
     r"uses:\s*(?P<action>[\w.-]+/[\w./-]+)@(?P<sha>[0-9a-f]{40})(?P<rest>.*)$")
 VERSION = re.compile(r"\bv\d+(?:\.\d+)*\b")
+FULL_VERSION = re.compile(r"\bv\d+\.\d+\.\d+\b")
+
+
+def pinned_files():
+    """Workflows, the caller templates we ship, and our composite actions.
+    Templates are copied into other repos and Dependabot never sees them, so
+    they are exactly where a stale pin survives unnoticed."""
+    files = sorted(WORKFLOWS.glob("*.yml")) + sorted(WORKFLOWS.glob("*.yaml"))
+    files += sorted(TEMPLATES.rglob("*.yml")) + sorted(ACTIONS.glob("*/action.yml"))
+    return files
 
 
 def pins():
     """(path, lineno, action, sha, trailing comment) for every SHA-pinned use."""
-    for f in sorted(WORKFLOWS.glob("*.yml")) + sorted(WORKFLOWS.glob("*.yaml")):
+    for f in pinned_files():
         for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
             m = USES.search(line)
             if m:
-                yield f.name, n, m.group("action"), m.group("sha"), m.group("rest")
+                yield (str(f.relative_to(REPO)), n, m.group("action"),
+                       m.group("sha"), m.group("rest"))
 
 
 class ActionPins(unittest.TestCase):
@@ -90,6 +103,28 @@ class ActionPins(unittest.TestCase):
                     f"{sha[:10]}…, which is {claimed} for nobody. "
                     f"{claimed} is {known[claimed][:10]}…",
                 )
+
+    def test_every_pin_names_a_full_version(self):
+        """`# v4` / `# v9` hide which release is pinned (and that a bump
+        happened); CONTRIBUTING.md requires a `# vX.Y.Z` comment."""
+        for name, n, action, sha, rest in pins():
+            with self.subTest(f"{name}:{n}"):
+                self.assertTrue(
+                    FULL_VERSION.search(rest),
+                    f"{name}:{n}: {action}@{sha[:10]} needs a full `# vX.Y.Z` comment")
+
+    def test_one_sha_per_action_across_workflows_templates_and_actions(self):
+        """The templates once shipped labeler v5 / stale v9 (node20) while
+        self-CI ran labeler v7: a bump must land everywhere at once."""
+        seen = {}
+        for name, n, action, sha, rest in pins():
+            seen.setdefault(action, {}).setdefault(sha, []).append(f"{name}:{n}")
+        for action, by_sha in seen.items():
+            with self.subTest(action):
+                self.assertEqual(
+                    len(by_sha), 1,
+                    f"{action} is pinned to {len(by_sha)} different SHAs: "
+                    + "; ".join(f"{sha[:10]} at {', '.join(where)}" for sha, where in by_sha.items()))
 
     def test_no_retired_sha_survives(self):
         """v4.2.2 was superseded repo-wide; leaving one behind is the split

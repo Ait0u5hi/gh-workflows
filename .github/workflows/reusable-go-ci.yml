@@ -2,7 +2,7 @@
 # opt-in golangci-lint. No third-party marketplace actions: only first-party
 # actions/setup-go, the built-in go toolchain, and a golangci-lint install
 # pinned by installer commit SHA + version (the install.sh verifies the binary
-# checksum). See docs/marketplace-research.md for the dependency-minimization
+# checksum). See the README "Design notes" for the dependency-minimization
 # rationale. Callers: see templates/go/ci.yml.
 name: Reusable Go CI
 

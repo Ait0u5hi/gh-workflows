@@ -47,11 +47,25 @@ def check(root: Path, skip: set[str], require_link: bool) -> list[str]:
             print(f"  skip     {name} (waived)")
             continue
         p = root / name
+        if p.is_symlink():
+            # A symlink to another doc in the repo is fine (LICENSE -> LICENSE.md);
+            # one to /dev/null or outside the checkout is not a doc at all.
+            target = p.resolve()
+            if not (target.is_relative_to(root.resolve()) and target.is_file()):
+                failures.append(f"{name} is a symlink that does not resolve to a file in the repo")
+                print(f"  BADLINK  {name}")
+                continue
         if not p.exists():
             failures.append(f"{name} is missing - {why}")
             print(f"  MISSING  {name}")
             continue
-        if p.is_file() and p.stat().st_size == 0:
+        if not p.is_file():
+            # e.g. a directory named CONTRIBUTING.md, which also used to skip
+            # the standard-link check below.
+            failures.append(f"{name} is not a regular file")
+            print(f"  NOTFILE  {name}")
+            continue
+        if p.stat().st_size == 0:
             failures.append(f"{name} exists but is empty")
             print(f"  EMPTY    {name}")
             continue

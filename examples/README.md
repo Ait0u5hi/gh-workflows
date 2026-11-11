@@ -57,7 +57,7 @@ jobs:
   ci:
     uses: <your-org>/gh-workflows/.github/workflows/reusable-node-ci.yml@v1
     with:
-      node-versions: '["20","22"]'
+      node-versions: '["22","24"]'
       # run-typecheck: true
       # test-command: "npm test --if-present"
 ```

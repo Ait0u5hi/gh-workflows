@@ -19,6 +19,6 @@ jobs:
   ci:
     uses: Ait0u5hi/gh-workflows/.github/workflows/reusable-go-ci.yml@v1
     # with:
-    #   go-versions: '["1.23","stable"]'   # widen the matrix
+    #   go-versions: '["oldstable","stable"]'   # widen the matrix
     #   run-lint: true                      # needs a .golangci.yml in the repo
     #   run-race: false                     # if the suite is not race-safe yet

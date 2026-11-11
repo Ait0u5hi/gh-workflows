@@ -3,10 +3,17 @@ name: PR Governance
 
 on:
   pull_request:
+    # Same trigger set as templates/pr-governance.yml (a test keeps them in
+    # step): without `edited`, a corrected PR title never re-runs pr-title.
+    types: [opened, synchronize, reopened, edited]
     branches: [main]
 
 permissions:
   contents: read
+
+concurrency:
+  group: pr-governance-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   contributor-check:

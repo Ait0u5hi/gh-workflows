@@ -108,13 +108,18 @@ class TestFileOnly(unittest.TestCase):
             self.assertEqual(r.returncode, 0)
             self.assertIn("content-scan clean", r.stdout)
 
-    def test_no_active_patterns_is_a_clean_no_op(self):
+    def test_no_active_patterns_fails_closed(self):
+        # A PR can comment out every pattern in the committed file; that must
+        # not turn the gate green ("either source must resolve to at least
+        # one pattern" is the documented contract).
         with Tree(**{
             ".github/content-scan-patterns.txt": "# only comments\n\n",
             "file.txt": "anything\n",
         }) as t:
             r = t.run()
-            self.assertEqual(r.returncode, 0)
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("::error::", r.stdout)
+            self.assertIn("no active patterns", r.stdout)
 
 
 class TestSecretOnly(unittest.TestCase):
@@ -288,6 +293,113 @@ class TestRgBin(unittest.TestCase):
             self.assertIn("./unguarded.txt", r.stdout)
             self.assertNotIn("./guarded.txt", r.stdout)
 
+
+class TestAdversarialTree(unittest.TestCase):
+    """The scanned tree (and the committed patterns file) come from the PR,
+    so they are attacker-controlled. None of these may turn the gate green
+    or leak data into the (public) log."""
+
+    def test_patterns_symlink_out_of_the_workspace_is_refused_and_not_printed(self):
+        outside = Path(tempfile.mkdtemp())
+        try:
+            (outside / "credentials").write_text("TOPSECRET-RUNNER-TOKEN\n")
+            with Tree(**{"file.txt": "anything\n"}) as t:
+                (t.dir / ".github").mkdir()
+                os.symlink(outside / "credentials", t.dir / ".github/content-scan-patterns.txt")
+                r = t.run()
+                self.assertEqual(r.returncode, 1)
+                self.assertIn("resolves outside the workspace", r.stdout)
+                self.assertNotIn("TOPSECRET-RUNNER-TOKEN", r.stdout + r.stderr)
+        finally:
+            shutil.rmtree(outside, ignore_errors=True)
+
+    def test_patterns_symlink_inside_the_workspace_is_accepted(self):
+        with Tree(**{"patterns/real.txt": "alpha\n", "leaky.txt": "alpha\n"}) as t:
+            (t.dir / ".github").mkdir()
+            os.symlink("../patterns/real.txt", t.dir / ".github/content-scan-patterns.txt")
+            r = t.run()
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn("1 active pattern(s)", r.stdout)
+            self.assertIn("leaky.txt", r.stdout)
+
+    def test_committed_patterns_are_counted_not_echoed(self):
+        with Tree(**{
+            ".github/content-scan-patterns.txt": "alpha-pattern\nbeta-pattern\n",
+            "clean.txt": "nothing\n",
+        }) as t:
+            r = t.run()
+            self.assertEqual(r.returncode, 0)
+            self.assertIn("2 active pattern(s)", r.stdout)
+            self.assertNotIn("alpha-pattern", r.stdout)
+
+    def test_ignore_files_cannot_hide_a_match(self):
+        for ignore_name in (".rgignore", ".ignore"):
+            with self.subTest(ignore_name=ignore_name), Tree(**{
+                ".github/content-scan-patterns.txt": "alpha\n",
+                ignore_name: "*\n",
+                "leaky.txt": "alpha\n",
+            }) as t:
+                r = t.run()
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+    def test_gitignored_tracked_file_is_still_scanned(self):
+        with Tree(**{
+            ".github/content-scan-patterns.txt": "alpha\n",
+            ".gitignore": "leaky.txt\n",
+            "leaky.txt": "alpha\n",
+        }) as t:
+            subprocess.run(["git", "init", "-q"], cwd=t.dir, check=True)
+            r = t.run()
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+    def test_nul_byte_does_not_make_a_file_skippable(self):
+        with Tree(**{".github/content-scan-patterns.txt": "alpha\n"}) as t:
+            (t.dir / "leaky.bin").write_bytes(b"\x00\x00\nthe alpha secret\n")
+            r = t.run()
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+    def test_nul_byte_in_patterns_file_does_not_drop_patterns(self):
+        with Tree(**{"leaky.txt": "alpha\n"}) as t:
+            (t.dir / ".github").mkdir()
+            (t.dir / ".github/content-scan-patterns.txt").write_bytes(b"alpha\n\x00\n")
+            r = t.run()
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+    def test_regex_error_in_redact_mode_does_not_leak_secret_patterns(self):
+        with Tree(**{"file.txt": "anything\n"}) as t:
+            r = t.run(patterns_file=".github/does-not-exist.txt",
+                      patterns_secret="topsecret-internal-host\n(unbalanced\n")
+            self.assertNotEqual(r.returncode, 0)
+            self.assertNotIn("topsecret-internal-host", r.stdout + r.stderr)
+
+    def test_option_shaped_filename_from_a_glob_is_not_an_rg_option(self):
+        with Tree(**{
+            ".github/content-scan-patterns.txt": "alpha\n",
+            "--pre=bash": "",
+            "payload.sh": "touch PWNED\n",
+        }) as t:
+            r = t.run(paths="*")
+            self.assertFalse((t.dir / "PWNED").exists(), "rg ran a PR-named --pre command")
+            # "--pre=bash" is scanned as a (empty) file, not consumed as an option.
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("content-scan clean", r.stdout)
+
+    def test_match_output_is_bracketed_by_stop_commands(self):
+        # A newline in a PR filename puts attacker text at the start of a log
+        # line, where the runner would parse it as a workflow command.
+        with Tree(**{".github/content-scan-patterns.txt": "alpha\n"}) as t:
+            (t.dir / "a\n::warning::forged").write_text("alpha\n")
+            r = t.run()
+            self.assertEqual(r.returncode, 1)
+            lines = r.stdout.splitlines()
+            stop = [i for i, l in enumerate(lines) if l.startswith("::stop-commands::")]
+            self.assertEqual(len(stop), 1, r.stdout)
+            token = lines[stop[0]].split("::", 2)[2]
+            self.assertGreaterEqual(len(token), 16)
+            resume = lines.index(f"::{token}::")
+            forged = lines.index(next(l for l in lines if l.startswith("::warning::forged")))
+            self.assertLess(stop[0], forged)
+            self.assertLess(forged, resume)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
