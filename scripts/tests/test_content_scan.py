@@ -299,7 +299,7 @@ class TestAdversarialTree(unittest.TestCase):
     so they are attacker-controlled. None of these may turn the gate green
     or leak data into the (public) log."""
 
-    def test_symlinked_patterns_file_is_refused_and_target_not_printed(self):
+    def test_patterns_symlink_out_of_the_workspace_is_refused_and_not_printed(self):
         outside = Path(tempfile.mkdtemp())
         try:
             (outside / "credentials").write_text("TOPSECRET-RUNNER-TOKEN\n")
@@ -308,10 +308,19 @@ class TestAdversarialTree(unittest.TestCase):
                 os.symlink(outside / "credentials", t.dir / ".github/content-scan-patterns.txt")
                 r = t.run()
                 self.assertEqual(r.returncode, 1)
-                self.assertIn("symlink", r.stdout)
+                self.assertIn("resolves outside the workspace", r.stdout)
                 self.assertNotIn("TOPSECRET-RUNNER-TOKEN", r.stdout + r.stderr)
         finally:
             shutil.rmtree(outside, ignore_errors=True)
+
+    def test_patterns_symlink_inside_the_workspace_is_accepted(self):
+        with Tree(**{"patterns/real.txt": "alpha\n", "leaky.txt": "alpha\n"}) as t:
+            (t.dir / ".github").mkdir()
+            os.symlink("../patterns/real.txt", t.dir / ".github/content-scan-patterns.txt")
+            r = t.run()
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn("1 active pattern(s)", r.stdout)
+            self.assertIn("leaky.txt", r.stdout)
 
     def test_committed_patterns_are_counted_not_echoed(self):
         with Tree(**{
@@ -369,8 +378,11 @@ class TestAdversarialTree(unittest.TestCase):
             "--pre=bash": "",
             "payload.sh": "touch PWNED\n",
         }) as t:
-            t.run(paths="*")
+            r = t.run(paths="*")
             self.assertFalse((t.dir / "PWNED").exists(), "rg ran a PR-named --pre command")
+            # "--pre=bash" is scanned as a (empty) file, not consumed as an option.
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("content-scan clean", r.stdout)
 
     def test_match_output_is_bracketed_by_stop_commands(self):
         # A newline in a PR filename puts attacker text at the start of a log

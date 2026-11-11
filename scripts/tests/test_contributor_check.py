@@ -123,6 +123,29 @@ class TestContributorCheck(unittest.TestCase):
             self.assertEqual(res.returncode, 1)
             self.assertIn("hidden@evil.io", res.stdout)
 
+    def test_symlinked_alias_mapping_is_accepted(self):
+        with Repo() as r:
+            r.map("dev@example.com")
+            os.symlink("dev@example.com", r.dir / "contributors/emails/alias@example.com")
+            r.commit("feat", "Dev", "alias@example.com")
+            res = r.run()
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+
+    def test_missing_head_commit_fails_with_a_clear_error(self):
+        with Repo() as r:
+            r.commit("feat", "Dev", "dev@example.com")
+            script = r.dir.parent / (r.dir.name + ".sh")
+            script.write_text(step_script())
+            try:
+                res = subprocess.run(
+                    ["bash", "--noprofile", "--norc", "-e", str(script)], cwd=r.dir,
+                    env=dict(os.environ, BASE_REF="main", HEAD_SHA="0" * 40),
+                    capture_output=True, text=True, timeout=30)
+            finally:
+                script.unlink()
+            self.assertEqual(res.returncode, 1)
+            self.assertIn("::error::the PR head commit is not in this checkout", res.stdout)
+
     def test_author_name_cannot_forge_a_workflow_command(self):
         with Repo() as r:
             r.commit("x", "a\\n::error::forged", "dev@example.com")

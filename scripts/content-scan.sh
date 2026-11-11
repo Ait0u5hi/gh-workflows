@@ -52,16 +52,15 @@ if [ -n "$PATTERNS_FILE" ] && { [ -e "$PATTERNS_FILE" ] || [ -L "$PATTERNS_FILE"
   # Refuse anything but a regular file that really lives inside the scanned
   # workspace: a PR could otherwise symlink the patterns file to a runner
   # credential and have its lines read (and, before this check, printed).
-  if [ -L "$PATTERNS_FILE" ]; then
-    echo "::error::patterns file $PATTERNS_FILE is a symlink; refusing to read it"
-    exit 1
-  fi
+  # A symlink to another file in the repo is fine.
   if [ ! -f "$PATTERNS_FILE" ]; then
-    echo "::error::patterns file $PATTERNS_FILE is not a regular file; refusing to read it"
+    echo "::error::patterns file $PATTERNS_FILE is not a regular file (or is a dangling symlink); refusing to read it"
     exit 1
   fi
-  real_file=$(realpath -e -- "$PATTERNS_FILE")
-  real_root=$(realpath -e -- .)
+  # No `-e`: BSD/macOS realpath lacks it, and -f above already checked
+  # that the (resolved) file exists.
+  real_file=$(realpath -- "$PATTERNS_FILE")
+  real_root=$(realpath -- .)
   case "$real_file" in
     "$real_root"/*) ;;
     *)

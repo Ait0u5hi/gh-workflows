@@ -21,12 +21,13 @@ import shlex
 import sys
 from pathlib import Path
 
-# A fence opener: up to 3 spaces, then >=3 backticks or tildes, then an
+# A fence opener: any indentation (fences nested in list items are indented
+# 4+ spaces), then >=3 backticks or tildes, then an
 # optional info string ("bash", "bash title=x", "Bash"). Parsed line by line,
 # not with one multi-line regex: a regex like ```(bash)?\n(.*?)``` treats the
 # CLOSING fence of a preceding ```text block as an opener and silently skips
 # the real bash block after it.
-FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})[ \t]*([^\s`]*)")
+FENCE_OPEN = re.compile(r"^\s*(`{3,}|~{3,})[ \t]*([^\s`]*)")
 SHELL_LANGS = {"", "bash", "sh", "console", "shell", "zsh", "shell-session"}
 ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 # Short aliases for the long flags checked below.

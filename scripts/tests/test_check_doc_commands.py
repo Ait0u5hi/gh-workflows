@@ -35,6 +35,10 @@ class TestExtract(unittest.TestCase):
             with self.subTest(md=md):
                 self.assertEqual(cdc.extract(md), [BAD])
 
+    def test_fence_indented_inside_a_nested_list_is_read(self):
+        md = "1. Step\n   - sub\n\n     ```bash\n     " + BAD + "\n     ```\n"
+        self.assertEqual(cdc.extract(md), [BAD])
+
     def test_non_shell_blocks_are_ignored(self):
         self.assertEqual(cdc.extract("```yaml\nrun: " + BAD + "\n```\n"), [])
 

@@ -15,16 +15,19 @@ items below change behavior (marked **behavior change**) — see the
 - `reusable-release.yml`: the tag name reached a shell unquoted through
   git-cliff-action's `run: … ${{ inputs.args }}` and through the plugin.yaml
   `sed`, in a job holding `contents: write` + persisted credentials. Tags are
-  now validated (`v1`, `v1.2.3`, `v1.2.3-rc.1`, `v1.2.3+build.5`) before
-  anything else runs, and git-cliff 2.14.2 is installed directly (pinned +
+  now validated (SemVer-shaped: `v1`, `v1.2.3`, `v1.2.3-rc.1`,
+  `v1.0.0-alpha-1`, `v1.2.3-beta.1+exp`) before anything else runs, and git-cliff 2.14.2 is installed directly (pinned +
   SHA-256 verified) instead of via the action, whose installer downloads the
   binary unverified. **Behavior change:** other tag shapes are refused.
-- `reusable-release.yml`: release notes are `<previous tag>..<this tag>` on a
-  worktree of the tag (was `--latest` on the default branch's HEAD, which
-  published the wrong notes for backport tags and filed post-tag commits under
-  the release); the GitHub Release is created/updated before the changelog
-  push; backport tags skip the changelog commit; `permissions: {}` at the top,
-  `contents: write` on the job; a concurrency group serialises releases.
+- `reusable-release.yml`: release notes are git-cliff `--current` on a
+  worktree of the tag, honouring `cliff.toml` tag filters (was `--latest` on
+  the default branch's HEAD, which published the wrong notes for backport tags
+  and filed post-tag commits under the release); the GitHub Release is
+  created/updated before the changelog push, which retries on the latest
+  default branch when several tags race; backport tags skip the changelog
+  commit; `permissions: {}` at the top, `contents: write` on the job.
+  **Behavior change:** Linux X64/ARM64 runners only (as with the pinned
+  binaries elsewhere).
 - `scripts/content-scan.sh` / `actions/content-scan`: a symlinked patterns file
   was read and echoed (e.g. a runner credential); `.gitignore`/`.ignore`/
   `.rgignore` entries or a leading NUL byte hid files from the scan; a regex

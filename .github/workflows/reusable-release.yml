@@ -9,11 +9,17 @@
 #   env + quoting — never via a `${{ }}` expansion or a third-party action's
 #   unquoted `args:` (the reason git-cliff is installed directly below, pinned
 #   and SHA-256 verified, instead of through orhun/git-cliff-action).
-# - Release notes cover exactly <previous tag>..<this tag>, computed on a
-#   worktree of the tag — not on the default branch's HEAD, which may already
-#   contain later commits, and which is the wrong history for a backport tag.
+# - Release notes are git-cliff's `--current` (this tag back to the previous
+#   one, honouring cliff.toml's tag filters such as ignore_tags = "rc"),
+#   computed on a worktree of the tag — not on the default branch's HEAD,
+#   which may already contain later commits, and which is the wrong history
+#   for a backport tag.
 # - The GitHub Release is created (or updated, on a re-run) BEFORE the
 #   changelog push, so a rejected push can't leave a tag without a Release.
+# - No workflow-level concurrency group: with three or more tags pushed at
+#   once GitHub would cancel the middle pending run (one running + one
+#   pending per group), leaving that tag without a Release. Instead the
+#   changelog push retries on top of the latest default branch.
 name: Reusable Release
 
 on:
@@ -33,11 +39,6 @@ on:
 
 permissions: {}
 
-# Two tags pushed together must not race each other's changelog push.
-concurrency:
-  group: release-${{ github.repository }}
-  cancel-in-progress: false
-
 jobs:
   release:
     runs-on: ${{ inputs.runs-on }}
@@ -52,9 +53,10 @@ jobs:
             echo "::error::reusable-release must be triggered by a tag push (got ref type '${GITHUB_REF_TYPE}')"
             exit 1
           fi
-          # v1 / v1.2 / v1.2.3 / v1.2.3-rc.1 / v1.2.3+build.5 — nothing else.
-          # This excludes every shell metacharacter and sed's `/`, `&`, `\`.
-          if ! [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+(\.[0-9]+)*([-+][0-9A-Za-z.]+)?$ ]]; then
+          # v1 / v1.2 / v1.2.3 / v1.2.3-rc.1 / v1.0.0-alpha-1 / v1.2.3-beta.1+exp
+          # (SemVer pre-release and build) — nothing else. This excludes every
+          # shell metacharacter and sed's `|`, `/`, `&`, `\`.
+          if ! [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+(\.[0-9]+)*(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::refusing to release tag with unexpected characters; expected v<digits>[.<digits>...][-<pre>|+<build>]"
             exit 1
           fi
@@ -69,23 +71,30 @@ jobs:
 
       - name: Install git-cliff (pinned version + SHA-256 verified)
         env:
-          # orhun/git-cliff v2.14.2, x86_64-unknown-linux-gnu (SHA-512 also
-          # matches the upstream .sha512 asset).
+          # orhun/git-cliff v2.14.2 (SHA-512 of both also matches the upstream
+          # .sha512 assets).
           GIT_CLIFF_VERSION: "2.14.2"
-          GIT_CLIFF_SHA256: 24f397c733add5390fdceee3a2088588ab0d5f944ce00d34cb7029b888cf2db4
+          GIT_CLIFF_SHA256_X64: 24f397c733add5390fdceee3a2088588ab0d5f944ce00d34cb7029b888cf2db4 # x86_64-unknown-linux-gnu
+          GIT_CLIFF_SHA256_ARM64: 69e208f6e4baef3a0f9b759d5f44223aa9336b86c691072a3d0c98d35a816e69 # aarch64-unknown-linux-gnu
+          RUNNER_OS_NAME: ${{ runner.os }}
           RUNNER_ARCH: ${{ runner.arch }}
         run: |
           set -euo pipefail
-          if [ "$RUNNER_ARCH" != "X64" ]; then
-            echo "::error::git-cliff is pinned for runner.arch=X64 only; got '$RUNNER_ARCH'"
+          if [ "$RUNNER_OS_NAME" != "Linux" ]; then
+            echo "::error::reusable-release runs on Linux runners only; got runner.os='$RUNNER_OS_NAME'"
             exit 1
           fi
+          case "$RUNNER_ARCH" in
+            X64) target=x86_64-unknown-linux-gnu; sha="$GIT_CLIFF_SHA256_X64" ;;
+            ARM64) target=aarch64-unknown-linux-gnu; sha="$GIT_CLIFF_SHA256_ARM64" ;;
+            *) echo "::error::no pinned git-cliff build for runner.arch='$RUNNER_ARCH'"; exit 1 ;;
+          esac
           dir="$RUNNER_TEMP/git-cliff"
           mkdir -p "$dir"
-          tarball="git-cliff-${GIT_CLIFF_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          tarball="git-cliff-${GIT_CLIFF_VERSION}-${target}.tar.gz"
           curl -sSfL -o "$dir/$tarball" \
             "https://github.com/orhun/git-cliff/releases/download/v${GIT_CLIFF_VERSION}/${tarball}"
-          (cd "$dir" && echo "${GIT_CLIFF_SHA256}  ${tarball}" | sha256sum -c - \
+          (cd "$dir" && echo "${sha}  ${tarball}" | sha256sum -c - \
             && tar -xzf "$tarball" --strip-components=1 "git-cliff-${GIT_CLIFF_VERSION}/git-cliff")
           echo "$dir" >> "$GITHUB_PATH"
 
@@ -94,17 +103,16 @@ jobs:
           set -euo pipefail
           tree="$RUNNER_TEMP/tag-tree"
           git worktree add --detach "$tree" "refs/tags/${GITHUB_REF_NAME}"
-          prev=$(git -C "$tree" describe --tags --abbrev=0 --match 'v[0-9]*' 'HEAD^' 2>/dev/null || true)
-          if [ -n "$prev" ] && ! [[ "$prev" =~ ^v[0-9]+(\.[0-9]+)*([-+][0-9A-Za-z.]+)?$ ]]; then
-            echo "::error::previous tag has unexpected characters; refusing to build a range from it"
-            exit 1
+          notes="$RUNNER_TEMP/RELEASE_NOTES.md"
+          cfg="$GITHUB_WORKSPACE/cliff.toml"
+          # --current: this tag back to the previous one cliff.toml counts
+          # (so ignore_tags/tag_pattern apply). It errors when there is no
+          # earlier tag; for a first release the whole history up to the tag
+          # IS the release.
+          if ! (cd "$tree" && git-cliff --config "$cfg" --current --strip header --output "$notes"); then
+            echo "No earlier release tag; using the full history up to ${GITHUB_REF_NAME}."
+            (cd "$tree" && git-cliff --config "$cfg" --strip header --output "$notes")
           fi
-          range=()
-          if [ -n "$prev" ]; then
-            range=("${prev}..HEAD")
-          fi
-          (cd "$tree" && git-cliff --config "$GITHUB_WORKSPACE/cliff.toml" --strip header \
-            --output "$RUNNER_TEMP/RELEASE_NOTES.md" "${range[@]}")
           git worktree remove --force "$tree"
 
       - name: Create or update the GitHub Release
@@ -132,20 +140,32 @@ jobs:
             echo "::notice::${GITHUB_REF_NAME} is not on ${DEFAULT_BRANCH}; skipping the CHANGELOG commit"
             exit 0
           fi
-          # The tag already exists locally (fetch-tags), so git-cliff files its
-          # commits under it and anything newer on the branch as [unreleased].
-          git-cliff --config cliff.toml --output CHANGELOG.md
-          git add CHANGELOG.md
-          if [ "$PLUGIN_MANIFEST" = "true" ]; then
-            version="${GITHUB_REF_NAME#v}"   # charset validated in the first step
-            sed -i -E "s|^version: \".*\"|version: \"${version}\"|" plugin.yaml
-            git add plugin.yaml
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --cached --quiet; then
-            echo "nothing to commit"
-          else
-            git commit -m "chore(release): ${GITHUB_REF_NAME} changelog [skip ci]"
-            git push origin "HEAD:${DEFAULT_BRANCH}"
-          fi
+          # Several tags pushed at once run in parallel and race this push.
+          # On rejection, start again from the latest default branch: the
+          # changelog is regenerated from tags, so redoing it is correct.
+          for attempt in 1 2 3; do
+            # The tag already exists locally (fetch-tags), so git-cliff files
+            # its commits under it and anything newer as [unreleased].
+            git-cliff --config cliff.toml --output CHANGELOG.md
+            git add CHANGELOG.md
+            if [ "$PLUGIN_MANIFEST" = "true" ]; then
+              version="${GITHUB_REF_NAME#v}"   # charset validated in the first step
+              sed -i -E "s|^version: \".*\"|version: \"${version}\"|" plugin.yaml
+              git add plugin.yaml
+            fi
+            if git diff --cached --quiet; then
+              echo "nothing to commit"
+              exit 0
+            fi
+            git commit -q -m "chore(release): ${GITHUB_REF_NAME} changelog [skip ci]"
+            if git push origin "HEAD:${DEFAULT_BRANCH}"; then
+              exit 0
+            fi
+            echo "::warning::push to ${DEFAULT_BRANCH} rejected (attempt ${attempt}); retrying on the latest ${DEFAULT_BRANCH}"
+            git fetch --quiet origin "${DEFAULT_BRANCH}"
+            git reset --quiet --hard "origin/${DEFAULT_BRANCH}"
+          done
+          echo "::error::could not push the changelog to ${DEFAULT_BRANCH} after 3 attempts (the GitHub Release itself was created)"
+          exit 1

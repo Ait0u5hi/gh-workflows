@@ -41,6 +41,10 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || 'HEAD' }}
         run: |
           set -euo pipefail
+          if ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+            echo "::error::the PR head commit is not in this checkout — call this reusable from a pull_request trigger (pull_request_target checks out the base branch, which never contains a fork's commits)"
+            exit 1
+          fi
           MERGE_BASE=$(git merge-base "origin/${BASE_REF}" "${HEAD_SHA}")
           # Merge commits included: a merge commit can carry arbitrary changes,
           # so its author is checked like any other.
@@ -77,7 +81,9 @@ jobs:
               missing+=("$email|(not a usable email address)")
               continue
             fi
-            if [ -f "contributors/emails/${email}" ] && [ ! -L "contributors/emails/${email}" ]; then
+            # VALID_RE already rules out path-shaped emails; a symlinked
+            # mapping (an alias address) is fine.
+            if [ -f "contributors/emails/${email}" ]; then
               continue
             fi
             author=$(git log "${MERGE_BASE}..${HEAD_SHA}" --author="$email" --format='%an' -1 -F)

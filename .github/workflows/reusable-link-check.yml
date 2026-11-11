@@ -52,12 +52,14 @@ jobs:
           LYCHEE_ARGS: ${{ inputs.args }}
         run: |
           set -euo pipefail
-          # Split on whitespace WITHOUT shell globbing (read -a never globs) and
-          # strip one level of surrounding quotes, so a glob reaches lychee
-          # intact and lychee expands it itself. The old unquoted $LYCHEE_ARGS
-          # passed the default's quotes through literally: lychee looked for a
-          # file named "'./**/*.md'", found none, checked 0 links and passed.
-          read -ra raw <<<"$LYCHEE_ARGS"
+          # Split on whitespace — newlines included, so a multi-line `args: |`
+          # works — WITHOUT shell globbing (read -a never globs), and strip one
+          # level of surrounding quotes, so a glob reaches lychee intact and
+          # lychee expands it itself. The old unquoted $LYCHEE_ARGS passed the
+          # default's quotes through literally: lychee looked for a file named
+          # "'./**/*.md'", found none, checked 0 links and passed.
+          # (`read -d ''` returns 1 at end of input; that is expected.)
+          read -ra raw -d '' <<<"$LYCHEE_ARGS" || true
           args=()
           for a in "${raw[@]}"; do
             case "$a" in
